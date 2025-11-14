@@ -1,20 +1,23 @@
 // lib/pages/connect_page.dart
-// Ajustado para comportamento igual ao C#:
-// - NÃO iniciar leitura automaticamente ao conectar/receber DI
-// - Botões explicitos "Iniciar Leitura" / "Parar Leitura"
-// - startAcquisition envia ZO/CS/SA e só então liga o polling (_proto.startAutoReadLoop())
-// - stopAcquisition pára o polling (_proto.stopAutoReadLoop())
+// Integração com PhoenixTransducer (opção A) - interface espelho do C#
+// - Usa a implementação Dart de PhoenixTransducer (TCP only)
+// - Botões: Conectar / Desconectar, Request Info, Iniciar Leitura, Parar Leitura, Zeros
+// - Exibe Device Information e Última leitura (TQ/Angle) e contadores simples
+// - Comentários e instruções passo-a-passo para desenvolvedor/usuário leigo
+//
+// Alterações nesta versão:
+// - Importa lib/models/data_information.dart (classe DataInformation real)
+// - Atualiza todas as referências a campos de DataInformation para os nomes em camelCase
+// - Mantém comportamento e callbacks já existentes
 
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
-import '../services/tcp_connection.dart';
-import '../services/transducer_protocol.dart';
-import '../services/port_scanner.dart';
-import '../services/android_network_bind.dart';
-import '../models/transducer_models.dart';
+
+import '../models/data_information.dart'; // <- import da sua classe DataInformation (nova)
+import '../services/phoenix_transducer.dart';
+import '../services/transducer_logger.dart'; // logger defensivo que gravará TX/RX/erros
+
+enum ConnectionStatus { disconnected, connecting, connected, error }
 
 class ConnectPage extends StatefulWidget {
   const ConnectPage({Key? key}) : super(key: key);
@@ -24,309 +27,323 @@ class ConnectPage extends StatefulWidget {
 }
 
 class _ConnectPageState extends State<ConnectPage> {
-  final _ipController = TextEditingController(text: '192.168.4.1');
-  final _portController = TextEditingController(text: '23');
+  final TextEditingController _ipController = TextEditingController(text: '192.168.4.1');
+  final TextEditingController _portController = TextEditingController(text: '23');
 
-  final TcpConnection _conn = TcpConnection();
-  late TransducerProtocol _proto;
-
+  PhoenixTransducer? _transducer;
   ConnectionStatus _status = ConnectionStatus.disconnected;
-  final List<String> _log = [];
 
-  // internal buffer for throttled logging
-  final List<String> _logBuffer = [];
-  Timer? _logFlushTimer;
-
-  StreamSubscription<ConnectionStatus>? _statusSub;
-  StreamSubscription<Uint8List>? _dataSub;
-  StreamSubscription<Object>? _errSub;
-  StreamSubscription<DataResult>? _resSub;
-  StreamSubscription<DataInformation>? _infoSub;
-  StreamSubscription<String>? _rawPacketSub;
-  StreamSubscription<String>? _payloadSub;
-
-  DataResult? _lastResult;
+  // UI state mirrored from transducer callbacks
   DataInformation? _deviceInfo;
-
-  bool _scanning = false;
-  bool _isReading = false; // novo: indica se a aquisição está ativa
+  DataResult? _lastResult;
+  List<DataResult> _lastTestResults = [];
+  CountersInformation? _countersInfo;
+  String _message = ''; // small status/messages area
 
   @override
   void initState() {
     super.initState();
-    _proto = TransducerProtocol(_conn);
-
-    // start periodic log flush (throttle UI updates)
-    _logFlushTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-      if (_logBuffer.isNotEmpty) {
-        setState(() {
-          _log.addAll(_logBuffer);
-          if (_log.length > 400) _log.removeRange(0, _log.length - 400);
-          _logBuffer.clear();
-        });
-      }
-    });
-
-    _statusSub = _conn.statusStream.listen((s) {
-      _enqueueLog('STATUS: $s');
-      setState(() => _status = s);
-    });
-
-    _dataSub = _conn.dataStream.listen((bytes) {
-      final text = _tryDecode(bytes);
-      _enqueueLog('RAW TCP RX (bytes): $text');
-    });
-
-    _errSub = _conn.errorStream.listen((err) {
-      _enqueueLog('ERR: $err');
-    });
-
-    _resSub = _proto.dataResultStream.listen((res) {
-      _enqueueLog('DATARESULT: ${res.toString()}');
-      setState(() => _lastResult = res);
-    });
-
-    _infoSub = _proto.infoStream.listen((info) {
-      _enqueueLog('INFO (typed): ${info.toString()}');
-      setState(() => _deviceInfo = info);
-      // NOT automatic start: do NOT call _proto.startAutoReadLoop() here.
-      // The user action "Iniciar Leitura" will call startAcquisition().
-    });
-
-    _rawPacketSub = _proto.rawPacketStream.listen((s) {
-      _enqueueLog('RAW PACKET: $s');
-    });
-    _payloadSub = _proto.payloadStream.listen((s) {
-      _enqueueLog('PAYLOAD: $s');
-    });
-  }
-
-  void _enqueueLog(String s) {
-    final now = DateTime.now().toIso8601String().substring(11, 19);
-    _logBuffer.add('[$now] $s');
-    if (_logBuffer.length > 500) _logBuffer.removeAt(0);
-  }
-
-  String _tryDecode(List<int> bytes) {
-    try {
-      return utf8.decode(bytes);
-    } catch (e) {
-      return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
-    }
-  }
-
-  Future<void> _toggleConnection() async {
-    if (_conn.isConnected) {
-      // ao desconectar, pare leitura e unbind
-      if (_isReading) await stopAcquisition();
-      try {
-        await AndroidNetworkBind.unbind();
-      } catch (_) {}
-      await _conn.disconnect();
-      _enqueueLog('Desconectado manualmente');
-      return;
-    }
-
-    final ip = _ipController.text.trim();
-    final port = int.tryParse(_portController.text.trim()) ?? 23;
-    _enqueueLog('Tentando conectar em $ip:$port');
-
-    // bind network to ensure socket routes correctly
-    try {
-      final bindRes = await AndroidNetworkBind.bindToWifi();
-      _enqueueLog('Network bind result: $bindRes');
-    } catch (e) {
-      _enqueueLog('Network bind failed (continuing): $e');
-    }
-
-    try {
-      await _conn.connect(ip, port, timeout: const Duration(seconds: 8), retries: 1, retryDelay: const Duration(seconds: 2));
-      _enqueueLog('Conectado em $ip:$port');
-
-      if (!_conn.isConnected) {
-        _enqueueLog('Socket dropped before handshake');
-        return;
-      }
-
-      try {
-        _enqueueLog('Handshake: solicitando ID (000000000000ID)');
-        final idPayload = await _proto.sendCommand('000000000000ID', expectedCom: 'ID', timeoutMs: 2000);
-        _enqueueLog('ID payload raw: $idPayload');
-        String parsedId = '000000000000';
-        if (idPayload != null && idPayload.length >= 12) parsedId = idPayload.substring(0, 12);
-        _enqueueLog('ID detectado: $parsedId');
-
-        try {
-          _enqueueLog('Enviando DI com id $parsedId');
-          final diPayload = await _proto.requestInformation(parsedId);
-          _enqueueLog('DI payload raw: $diPayload');
-        } catch (e) {
-          _enqueueLog('Erro DI (após ID): $e');
-        }
-      } catch (e) {
-        _enqueueLog('Handshake ID falhou: $e');
-      }
-    } catch (e, st) {
-      _enqueueLog('Connect failed: $e');
-      _enqueueLog('Stack: $st');
-    }
-  }
-
-  Future<void> _requestInfoImmediate() async {
-    if (!_conn.isConnected) {
-      _enqueueLog('Não conectado');
-      return;
-    }
-    final id = '000000000000';
-    try {
-      _enqueueLog('Enviando DI (imediato) -> $id');
-      final payload = await _proto.requestInformation(id);
-      _enqueueLog('DI resposta payload: $payload');
-    } catch (e) {
-      _enqueueLog('Erro DI: $e');
-    }
-  }
-
-  // ---------- New: Start / Stop acquisition controlled by user ----------
-  // Called when user presses "Iniciar Leitura"
-  Future<void> startAcquisition() async {
-    if (!_conn.isConnected) {
-      _enqueueLog('Não conectado - não inicia aquisição');
-      return;
-    }
-    if (_isReading) {
-      _enqueueLog('Aquisição já ativa');
-      return;
-    }
-
-    _enqueueLog('Iniciando aquisição (envia parâmetros SA/CS/ZO...)');
-    // chama initReadSequence (envia ZO/CS/SA) e depois liga o loop automático se bem-sucedido
-    try {
-      await _initReadSequence();
-      // se quiser que o device "push" por si próprio, não ligue o polling; caso contrário ligue:
-      _proto.startAutoReadLoop(interval: const Duration(milliseconds: 800)); // polling periódico
-      setState(() => _isReading = true);
-      _enqueueLog('Aquisição iniciada (auto-read ligado)');
-    } catch (e) {
-      _enqueueLog('Falha ao iniciar aquisição: $e');
-    }
-  }
-
-  // Called when user presses "Parar Leitura"
-  Future<void> stopAcquisition() async {
-    if (!_isReading) {
-      _enqueueLog('Aquisição não está ativa');
-      return;
-    }
-    _enqueueLog('Parando aquisição (parando polling)');
-    try {
-      _proto.stopAutoReadLoop();
-      // opcional: enviar comando de parada ao transdutor caso exista (ex.: ID + "SO" ou "RC" dependendo do firmware).
-      // await _proto.sendCommand((_deviceInfo?.id ?? '000000000000') + 'SO', expectedCom: 'SO', timeoutMs: 600);
-    } catch (e) {
-      _enqueueLog('Erro ao parar aquisição: $e');
-    } finally {
-      setState(() => _isReading = false);
-      _enqueueLog('Aquisição parada');
-    }
-  }
-
-  Future<void> _readTQ() async {
-    if (!_conn.isConnected) {
-      _enqueueLog('Não conectado - não envia TQ');
-      return;
-    }
-    try {
-      final payload = await _proto.sendCommand((_deviceInfo?.id ?? '000000000000') + 'TQ', expectedCom: 'TQ', timeoutMs: 1500);
-      _enqueueLog('TQ one-shot payload: $payload');
-    } catch (e) {
-      _enqueueLog('Erro TQ: $e');
-    }
-  }
-
-  // initReadSequence sends ZO/CS/SA and does the minimal waits (same as before)
-  Future<void> _initReadSequence({double thresholdNm = 4.0, double thresholdEndNm = 2.0}) async {
-    final id = (_deviceInfo?.id ?? '000000000000');
-    _enqueueLog('InitRead: usando id $id');
-
-    try {
-      await _proto.sendCommand('$id' + 'ZO10', expectedCom: 'ZO', timeoutMs: 600);
-    } catch (e) {
-      _enqueueLog('ZO torque erro (ok se ignorado): $e');
-    }
-    await Future.delayed(const Duration(milliseconds: 50));
-
-    try {
-      await _proto.sendCommand('$id' + 'ZO01', expectedCom: 'ZO', timeoutMs: 600);
-    } catch (e) {
-      _enqueueLog('ZO angle erro (ok se ignorado): $e');
-    }
-    await Future.delayed(const Duration(milliseconds: 50));
-
-    String hexByte(int v) => v.clamp(0, 255).toRadixString(16).padLeft(2, '0').toUpperCase();
-    final csPayload = hexByte(30) + hexByte(30) + hexByte(20);
-    try {
-      await _proto.sendCommand('$id' + 'CS' + csPayload, expectedCom: 'CS', timeoutMs: 600);
-    } catch (e) {
-      _enqueueLog('CS erro (ok se ignorado): $e');
-    }
-    await Future.delayed(const Duration(milliseconds: 50));
-
-    final tConv = _proto.torqueConversionFactor;
-    final thrAd = (thresholdNm / (tConv == 0 ? 1.0 : tConv)).round();
-    final thrEndAd = (thresholdEndNm / (tConv == 0 ? 1.0 : tConv)).round();
-
-    String hex32(int v) => v.toRadixString(16).padLeft(8, '0').toUpperCase();
-    String hex16(int v) => v.toRadixString(16).padLeft(4, '0').toUpperCase();
-    String hex8(int v) => v.toRadixString(16).padLeft(2, '0').toUpperCase();
-
-    final saPayload = hex32(thrAd) + hex32(thrEndAd) + hex16(1000) + hex16(1) + hex16(500) + hex8(0) + hex8(1);
-    try {
-      await _proto.sendCommand('$id' + 'SA' + saPayload, expectedCom: 'SA', timeoutMs: 1000);
-    } catch (e) {
-      _enqueueLog('SA erro (ok se ignorado): $e');
-    }
-    await Future.delayed(const Duration(milliseconds: 120));
-  }
-
-  Future<void> _scanPorts() async {
-    final host = _ipController.text.trim();
-    final portsToTry = [23, 2323, 80, 8080, 502, 5000, 9000, 5555];
-    setState(() {
-      _scanning = true;
-    });
-    _enqueueLog('Scan: iniciando varredura em $host ...');
-    try {
-      final open = await scanPorts(host, portsToTry, timeout: const Duration(seconds: 2));
-      if (open.isEmpty) {
-        _enqueueLog('Scan: nenhuma porta aberta encontrada entre: ${portsToTry.join(", ")}');
-      } else {
-        _enqueueLog('Scan: portas abertas: ${open.join(", ")}');
-        _portController.text = open.first.toString();
-      }
-    } catch (e) {
-      _enqueueLog('Scan error: $e');
-    } finally {
+    // Inicializa o logger (assumindo implementação TransducerLogger)
+    TransducerLogger.configure().then((_) {
       setState(() {
-        _scanning = false;
+        _message = 'Logger inicializado';
       });
-    }
+    }).catchError((e) {
+      setState(() {
+        _message = 'Falha ao inicializar logger: $e';
+      });
+    });
   }
 
   @override
   void dispose() {
-    _statusSub?.cancel();
-    _dataSub?.cancel();
-    _errSub?.cancel();
-    _resSub?.cancel();
-    _infoSub?.cancel();
-    _rawPacketSub?.cancel();
-    _payloadSub?.cancel();
-    _proto.dispose();
-    _conn.dispose();
-    _logFlushTimer?.cancel();
-    AndroidNetworkBind.unbind().catchError((_) {});
+    _disconnect();
+    _ipController.dispose();
+    _portController.dispose();
     super.dispose();
+  }
+
+  // Toggle connection (Connect / Disconnect)
+  Future<void> _toggleConnection() async {
+    if (_status == ConnectionStatus.connected || _status == ConnectionStatus.connecting) {
+      await _disconnect();
+    } else {
+      await _connect();
+    }
+  }
+
+  // Connect: create PhoenixTransducer, assign callbacks and start service
+  Future<void> _connect() async {
+    final ip = _ipController.text.trim();
+    final port = int.tryParse(_portController.text.trim()) ?? 23;
+
+    setState(() {
+      _status = ConnectionStatus.connecting;
+      _message = 'Conectando...';
+    });
+
+    // Create instance
+    _transducer = PhoenixTransducer();
+
+    // Assign callbacks (these will update the UI via setState)
+    _transducer!.onEvent = (String ev) {
+      setState(() {
+        _message = 'Evento: $ev';
+      });
+    };
+
+    _transducer!.onError = (int code) {
+      setState(() {
+        _status = ConnectionStatus.error;
+        _message = 'Erro do transdutor: $code';
+      });
+    };
+
+    _transducer!.onDataInformation = (DataInformation di) {
+      setState(() {
+        _deviceInfo = di;
+        _message = 'Device information received';
+      });
+    };
+
+    _transducer!.onDataResult = (DataResult dr) {
+      setState(() {
+        _lastResult = dr;
+      });
+    };
+
+    _transducer!.onTesteResult = (List<DataResult> results) {
+      setState(() {
+        _lastTestResults = results;
+        _message = 'TesteResult recebido: ${results.length} amostras';
+      });
+    };
+
+    _transducer!.onDebugInformation = (DebugInformation dbg) {
+      setState(() {
+        _message = 'Debug info state=${dbg.State}';
+      });
+    };
+
+    _transducer!.onCountersInformation = (CountersInformation ci) {
+      setState(() {
+        _countersInfo = ci;
+        _message = 'Counters received';
+      });
+    };
+
+    // Try to start service (connect TCP)
+    try {
+      await _transducer!.startService(ip, port);
+      setState(() {
+        _status = ConnectionStatus.connected;
+        _message = 'Conectado (tentativa concluída)';
+      });
+
+      // Start communication (ask for ID and counters) similar ao C#
+      _transducer!.startCommunication();
+    } catch (ex) {
+      setState(() {
+        _status = ConnectionStatus.error;
+        _message = 'Falha ao conectar: $ex';
+      });
+    }
+  }
+
+  // Disconnect: stop read and service and clear state
+  Future<void> _disconnect() async {
+    try {
+      if (_transducer != null) {
+        try {
+          _transducer!.stopReadData();
+        } catch (_) {}
+        try {
+          await _transducer!.stopService();
+        } catch (_) {}
+        try {
+          await _transducer!.dispose();
+        } catch (_) {}
+      }
+    } finally {
+      setState(() {
+        _transducer = null;
+        _status = ConnectionStatus.disconnected;
+        _deviceInfo = null;
+        _lastResult = null;
+        _lastTestResults = [];
+        _countersInfo = null;
+        _message = 'Desconectado';
+      });
+    }
+  }
+
+  // Request Information (DI) immediately
+  void _requestInfoImmediate() {
+    if (_transducer != null) {
+      _transducer!.requestInformation();
+      setState(() {
+        _message = 'Solicitado DI (Request Info)';
+      });
+    }
+  }
+
+  // Init read sequence (mirror InitReadSequence in C#)
+  // - Send Zero Torque (ZO), Zero Angle (ZO), CS (click wrench), SA (acquisition config), then start TQ
+  Future<void> _initReadSequence() async {
+    if (_transducer == null) return;
+    setState(() {
+      _message = 'Iniciando sequência de leitura (ZO, CS, SA, TQ)...';
+    });
+
+    // 1) Zero torque and angle (send flags; dispatcher will perform TX)
+    try {
+      _transducer!.setZeroTorque();
+      await Future.delayed(const Duration(milliseconds: 50)); // pequeno delay conforme C# (10ms) mas maior para segurança
+      _transducer!.setZeroAngle();
+    } catch (e) {
+      setState(() {
+        _message = 'Erro ao setar zero: $e';
+      });
+      return;
+    }
+
+    // 2) Click-wrench params
+    try {
+      _transducer!.setTestParameterClickWrench(10, 20, 10); // fall=10%, rise=20%, minMs=10
+      await Future.delayed(const Duration(milliseconds: 20));
+    } catch (e) {
+      // non-fatal
+    }
+
+    // 3) Acquisition config (SA) + SB/SC (use the new C#-compatible signature)
+    //
+    // IMPORTANT: phoenix_transducer.dart agora espera chamada no formato:
+    //   setTestParameter(DataInformation? info, TesteType type, ToolType toolType, double nominalTorque, double threshold, { ... })
+    //
+    // Exemplo: aqui usamos null para DataInformation (não precisamos passar), TesteType.TorqueOnly,
+    // nominalTorque = 4.0 (exemplo), threshold = 1.0 e demais parâmetros via named args.
+    try {
+      _transducer!.setTestParameter(
+        null, // DataInformation? (opcional na nossa implementação)
+        TesteType.TorqueOnly, // TesteType igual ao C#
+        ToolType.ToolType1, // ToolType
+        4.0, // nominalTorque (Nm) - ajuste conforme sua configuração
+        1.0, // threshold (Nm)
+        thresholdEnd: 0.5,
+        timeoutEndMs: 100,
+        timeStepMs: 10,
+        filterFrequency: 500,
+        direction: eDirection.CW,
+        // SB params (additional) - para evitar ER do transdutor, não deixar todos zero
+        torqueTarget: 4.0,
+        torqueMin: 2.0,
+        torqueMax: 6.0,
+        angleTarget: 10.0,
+        angleMin: 5.0,
+        angleMax: 15.0,
+        delayToDetectFirstPeakMs: 10,
+        timeToIgnoreNewPeakAfterFinalThresholdMs: 10,
+      );
+      await Future.delayed(const Duration(milliseconds: 20));
+    } catch (e) {
+      // non-fatal
+    }
+
+    // 4) Start reading (TQ polling and acquisition). Dispatcher will send SA/CS/SB/SC in order
+    try {
+      _transducer!.startReadData();
+      setState(() {
+        _message = 'Leitura iniciada (TQ)';
+      });
+    } catch (e) {
+      setState(() {
+        _message = 'Erro ao iniciar leitura: $e';
+      });
+    }
+  }
+
+  // Stop acquisition
+  void _stopReadSequence() {
+    if (_transducer == null) return;
+    _transducer!.stopReadData();
+    setState(() {
+      _message = 'Leitura parada';
+    });
+  }
+
+  // Send Zeros individually (buttons)
+  void _sendZeroTorque() {
+    if (_transducer == null) return;
+    _transducer!.setZeroTorque();
+    setState(() {
+      _message = 'Zero Torque enviado';
+    });
+  }
+
+  void _sendZeroAngle() {
+    if (_transducer == null) return;
+    _transducer!.setZeroAngle();
+    setState(() {
+      _message = 'Zero Angle enviado';
+    });
+  }
+
+  // Simple UI builder methods
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Transducer - Conexão TCP'),
+        actions: [
+          Padding(padding: const EdgeInsets.all(8.0), child: _statusChip()),
+        ],
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(10.0),
+          child: Column(children: [
+            _buildTopControls(width),
+            const SizedBox(height: 8),
+            _buildResultCard(),
+            const SizedBox(height: 8),
+            _buildInfoCard(),
+            const SizedBox(height: 8),
+            _buildCountersCard(),
+            const SizedBox(height: 8),
+            Expanded(child: _buildMessageArea()),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _statusChip() {
+    Color c;
+    String txt;
+    switch (_status) {
+      case ConnectionStatus.connecting:
+        c = Colors.orange;
+        txt = 'Conectando';
+        break;
+      case ConnectionStatus.connected:
+        c = Colors.green;
+        txt = 'Conectado';
+        break;
+      case ConnectionStatus.error:
+        c = Colors.red;
+        txt = 'Erro';
+        break;
+      case ConnectionStatus.disconnected:
+      default:
+        c = Colors.grey;
+        txt = 'Desconectado';
+        break;
+    }
+    return Chip(
+      backgroundColor: c,
+      label: Text(txt, style: const TextStyle(color: Colors.white)),
+    );
   }
 
   Widget _buildTopControls(double width) {
@@ -357,23 +374,27 @@ class _ConnectPageState extends State<ConnectPage> {
         children: [
           ElevatedButton(
             onPressed: _toggleConnection,
-            child: Text(_conn.isConnected ? 'Desconectar' : 'Conectar'),
+            child: Text((_status == ConnectionStatus.connected || _status == ConnectionStatus.connecting) ? 'Desconectar' : 'Conectar'),
           ),
           ElevatedButton(
-            onPressed: _conn.isConnected ? _requestInfoImmediate : null,
+            onPressed: (_status == ConnectionStatus.connected) ? _requestInfoImmediate : null,
             child: const Text('Request Info'),
           ),
           ElevatedButton(
-            onPressed: _conn.isConnected && !_isReading ? startAcquisition : null,
+            onPressed: (_status == ConnectionStatus.connected) ? _initReadSequence : null,
             child: const Text('Iniciar Leitura'),
           ),
           ElevatedButton(
-            onPressed: _conn.isConnected && _isReading ? stopAcquisition : null,
+            onPressed: (_status == ConnectionStatus.connected) ? _stopReadSequence : null,
             child: const Text('Parar Leitura'),
           ),
           ElevatedButton(
-            onPressed: _scanning ? null : _scanPorts,
-            child: _scanning ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Scan Ports'),
+            onPressed: (_status == ConnectionStatus.connected) ? _sendZeroTorque : null,
+            child: const Text('Zero Torque'),
+          ),
+          ElevatedButton(
+            onPressed: (_status == ConnectionStatus.connected) ? _sendZeroAngle : null,
+            child: const Text('Zero Angle'),
           ),
         ],
       ),
@@ -381,113 +402,95 @@ class _ConnectPageState extends State<ConnectPage> {
   }
 
   Widget _buildResultCard() {
-    final torque = _lastResult?.torque != null ? _lastResult!.torque.toStringAsFixed(3) : '--';
-    final angle = _lastResult?.angle != null ? _lastResult!.angle.toStringAsFixed(3) : '--';
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(10.0),
+        padding: const EdgeInsets.all(12.0),
         child: Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Última leitura', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              Text('Torque: $torque Nm', style: const TextStyle(fontSize: 14)),
-              const SizedBox(height: 4),
-              Text('Ângulo: $angle º', style: const TextStyle(fontSize: 14)),
+              const Text('Última Leitura', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text('Torque: ${_lastResult != null ? _lastResult!.Torque.toStringAsFixed(3) + " Nm" : "-"}'),
+              Text('Angulo: ${_lastResult != null ? _lastResult!.Angle.toStringAsFixed(3) + " °" : "-"}'),
+              const SizedBox(height: 8),
+              Text('Amostras de último teste: ${_lastTestResults.length}'),
             ]),
           ),
-          ElevatedButton(onPressed: _readTQ, child: const Text('Ler TQ')),
+          Column(children: [
+            ElevatedButton(
+              onPressed: _lastResult != null ? () {} : null,
+              child: const Text('Ver Valor'),
+            )
+          ])
         ]),
       ),
     );
   }
 
   Widget _buildInfoCard() {
-    if (_deviceInfo == null) return const SizedBox.shrink();
-    final info = _deviceInfo!;
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(8.0),
+        padding: const EdgeInsets.all(12.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Device Information', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          Text('ID: ${info.id}'),
-          Text('SN: ${info.serialNumber}'),
-          Text('Model: ${info.model}'),
-          Text('HW: ${info.hw}  FW: ${info.fw}'),
-          Text('Type: ${info.type}  Capacity: ${info.capacity}'),
-          Text('BufferSize: ${info.bufferSize}'),
+          const SizedBox(height: 8),
+          Text('ID: ${_deviceInfo != null ? _deviceInfo!.hardID : '-'}'),
+          Text('KeyName: ${_deviceInfo != null ? _deviceInfo!.keyName : '-'}'),
+          Text('Model: ${_deviceInfo != null ? _deviceInfo!.model : '-'}'),
+          Text('HW: ${_deviceInfo != null ? _deviceInfo!.hw : '-'}  FW: ${_deviceInfo != null ? _deviceInfo!.fw : '-'}'),
+          Text('TorqueConv: ${_deviceInfo != null ? _deviceInfo!.torqueConversionFactor.toString() : '-'}'),
+          Text('AngleConv: ${_deviceInfo != null ? _deviceInfo!.angleConversionFactor.toString() : '-'}'),
         ]),
       ),
     );
   }
 
-  Widget _buildLog() {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(6)),
-      child: ListView.builder(
-        itemCount: _log.length,
-        reverse: true,
-        itemBuilder: (context, idx) {
-          final item = _log[_log.length - 1 - idx];
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Text(item, style: const TextStyle(fontSize: 12)),
-          );
-        },
+  Widget _buildCountersCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Counters / Summary', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text('Cycles: ${_countersInfo != null ? _countersInfo!.cycles : '-'}'),
+          Text('Overshuts: ${_countersInfo != null ? _countersInfo!.overshuts : '-'}'),
+          Text('Higher Overshut: ${_countersInfo != null ? _countersInfo!.higherOvershut : '-'}'),
+        ]),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Transducer - Conexão TCP'),
-        actions: [
-          Padding(padding: const EdgeInsets.all(8.0), child: _statusChip()),
-        ],
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(10.0),
-          child: Column(children: [
-            _buildTopControls(w),
+  Widget _buildMessageArea() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Mensagens', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            _buildResultCard(),
-            const SizedBox(height: 8),
-            _buildInfoCard(),
-            const SizedBox(height: 8),
-            Expanded(child: _buildLog()),
+            Text(_message),
+            const SizedBox(height: 12),
+            if (_lastTestResults.isNotEmpty) ...[
+              const Text('Amostras (preview):', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 200,
+                child: ListView.builder(
+                  itemCount: _lastTestResults.length,
+                  itemBuilder: (context, index) {
+                    final r = _lastTestResults[index];
+                    return ListTile(
+                      dense: true,
+                      title: Text('T: ${r.Torque.toStringAsFixed(3)} Nm  A: ${r.Angle.toStringAsFixed(2)}°'),
+                      subtitle: Text('SampleTime: ${r.SampleTime} ms'),
+                    );
+                  },
+                ),
+              )
+            ]
           ]),
         ),
       ),
     );
-  }
-
-  Widget _statusChip() {
-    Color c;
-    String txt;
-    switch (_status) {
-      case ConnectionStatus.connecting:
-        c = Colors.orange;
-        txt = 'Conectando';
-        break;
-      case ConnectionStatus.connected:
-        c = Colors.green;
-        txt = 'Conectado';
-        break;
-      case ConnectionStatus.error:
-        c = Colors.red;
-        txt = 'Erro';
-        break;
-      case ConnectionStatus.disconnected:
-      default:
-        c = Colors.grey;
-        txt = 'Desconectado';
-    }
-    return Chip(label: Text(txt), backgroundColor: c.withOpacity(0.15));
   }
 }

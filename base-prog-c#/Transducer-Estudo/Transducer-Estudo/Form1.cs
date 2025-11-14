@@ -13,12 +13,7 @@ using Transducers;
 using System.IO;
 using System.Diagnostics;
 
-
-
-
-
-
-
+using Transducer_Estudo;
 
 namespace Transducer_Estudo
 {
@@ -56,58 +51,86 @@ namespace Transducer_Estudo
                 drpPortName.SelectedIndex = 0;
         }
 
+        // Form load: já configura o logger (você já tinha feito), adiciono log confirmando
         private void Form1_Load(object sender, EventArgs e)
         {
             ListPorts();
+            // Exemplo: configurar explicitamente para C:\logs (requer permissão)
+            // Descomente uma das opções abaixo conforme preferir.
+
+            // 1) Usar C:\logs (precisa de permissão administrativa)
+            // TransducerLogger.Configure(@"C:\logs", enabled: true);
+
+            // 2) (Recomendado) usar pasta do usuário dentro AppData (sem precisar de admin)
+            string appDataLogFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "transducerapp", "logs");
+            TransducerLogger.Configure(appDataLogFolder, enabled: true);
+
+            // 3) (alternativa) usar temp
+            // TransducerLogger.Configure(Path.Combine(Path.GetTempPath(), "transducer_debug.log"), enabled: true);
+
+            TransducerLogger.Log("Application START - logger configured");
+            TransducerLogger.LogFmt("Form1_Load - log file: {0}", TransducerLogger.FilePath);
+
+            // Pequeno teste: escreve uma linha e verifica se o arquivo existe, então mostra um MessageBox com o caminho
+            // (comentei a MessageBox para não atrapalhar execução contínua)
+            //try
+            //{
+            //    TransducerLogger.Log("Test write after configure");
+            //    string path = TransducerLogger.FilePath;
+            //    bool exists = File.Exists(path);
+            //    MessageBox.Show($"Logger configured. Path: {path}\nFile exists after test write: {exists}", "Logger", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            //}
+            //catch (Exception ex)
+            //{
+            //    MessageBox.Show("Erro ao testar logger: " + ex.Message, "Logger error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            //}
         }
 
+        // Botão que conecta via COM (UI). Adiciona log do evento.
         private void button2_Click(object sender, EventArgs e)
         {
             string sname = drpPortName.SelectedItem.ToString();
 
+            TransducerLogger.LogFmt("button2_Click - connect COM: {0}", sname);
             ConnectCom(sname);
-
         }
 
+        // Método central de conexão via serial (usado pela UI). Adiciona logs estratégicos.
         private void ConnectCom(string sname)
         {
             tickLastUpdateTorque = 0;
-            //lblUpdateTorque.Text = "0";
-            //lblUpdateTemp.Text = "0";
-            //lblTemp.Text = "0";
-            //lblVoltage.Text = "0";
+
+            TransducerLogger.LogFmt("ConnectCom: starting connect flow for port '{0}'", sname);
 
             if (Trans != null)
             {
+                TransducerLogger.Log("ConnectCom: stopping previous transducer (StopReadData/StopService)");
                 Trans.StopReadData();
                 Trans.StopService();
             }
 
-            //if (rdbSCS.Checked)
-                //Trans = new Transducer();
-            //else
+            // cria nova instância (não mudamos a implementação)
             Trans = new PhoenixTransducer();
-            //Trans.RaiseError += new ErrorReceiver(ErrorReceiver);
-            //Trans.RaiseEvent += new EventReceiver(EventReceiver);
-            //Trans.DataResult += new DataResultReceiver(ResultReceiver);
-            //Trans.DataInformation += new DataInformationReceiver(InformationReceiver);
+
+            // Inscreve os handlers essenciais (TestResult já estava inscrito)
             Trans.TesteResult += new DataTesteResultReceiver(TesteResultReceiver);
-            //Trans.DebugInformation += new DebugInformationReceiver(DebugReceiver);
-            //Trans.CountersInformation += new CountersInformationReceiver(CountersReceiver);
 
-            string[] s = new string[2];
-            //s[0] = "1";
-            //if (this.chkSimulAng.Checked)
-                //s[1] = "1";
-
+            // Configura performance e porta
             Trans.SetPerformance(ePCSpeed.Slow, eCharPoints.Many);
-
             Trans.PortName = sname;
-            //Trans.PortIndex = Convert.ToInt32(txtIndex.Text);
+
+            TransducerLogger.LogFmt("ConnectCom: calling StartService / StartCommunication / RequestInformation for port {0}", sname);
+            // inicia comunicação
             Trans.StartService();
             Trans.StartCommunication();
             Trans.RequestInformation();
+
+            TransducerLogger.Log("ConnectCom: started service and requested information");
+
+            // inicia timer do formulário para atualizar UI (comportamento original)
             timer1.Start();
+
+            TransducerLogger.Log("ConnectCom: timer1 started");
         }
 
         private void btnReadData_Click(object sender, EventArgs e)
@@ -117,71 +140,77 @@ namespace Transducer_Estudo
             lblAngulo.Text = "0 º";
             lblTorque.Text = "0 Nm";
 
+            TransducerLogger.Log("btnReadData_Click - calling InitRead()");
             InitRead();
-
         }
 
 
+        // InitRead: rotina que prepara a sequência ZO/CS/SA e inicia leitura.
+        // Adicionamos logs antes das chamadas que disparam comandos no transdutor.
         private void InitRead()
-
         {
             Debug.Print("---------- InitRead");
 
+            // Log antes de cada ação para correlacionar com TX no C#
+            TransducerLogger.Log("InitRead: SetZeroTorque");
             Trans.SetZeroTorque();
             System.Threading.Thread.Sleep(10);
+
+            TransducerLogger.Log("InitRead: SetZeroAngle");
             Trans.SetZeroAngle();
             System.Threading.Thread.Sleep(10);
-            Trans.SetTestParameter_ClickWrench(30, 30, 20);
-            Trans.SetTestParameter(Datainfo,
-            TesteType.TorqueOnly,
-            ToolType.ToolType1,
-            4M,
-            Convert.ToDecimal(txtThresholdIniFree.Text),
-            Convert.ToDecimal(txtThresholdEndFree.Text),
-            Convert.ToInt32(txtTimeoutFree.Text),
-            1,
-            500,
-            eDirection.CW,
-            Convert.ToDecimal(txtNominalTorque.Text),
-            Convert.ToDecimal(txtMinimumTorque.Text),
-            Convert.ToDecimal(txtMaximoTorque.Text),
-            100M,
-            10M,
-            300M,
-            50,
-            50);
 
+            TransducerLogger.Log("InitRead: SetTestParameter_ClickWrench(30,30,20)");
+            Trans.SetTestParameter_ClickWrench(30, 30, 20);
+
+            TransducerLogger.Log("InitRead: SetTestParameter (full)");
+            Trans.SetTestParameter(Datainfo,
+                TesteType.TorqueOnly,
+                ToolType.ToolType1,
+                4M,
+                Convert.ToDecimal(txtThresholdIniFree.Text),
+                Convert.ToDecimal(txtThresholdEndFree.Text),
+                Convert.ToInt32(txtTimeoutFree.Text),
+                1,
+                500,
+                eDirection.CW,
+                Convert.ToDecimal(txtNominalTorque.Text),
+                Convert.ToDecimal(txtMinimumTorque.Text),
+                Convert.ToDecimal(txtMaximoTorque.Text),
+                100M,
+                10M,
+                300M,
+                50,
+                50);
 
             System.Threading.Thread.Sleep(100);
+
+            TransducerLogger.Log("InitRead: calling StartReadData");
             Trans.StartReadData();
-
-
-
+            TransducerLogger.Log("InitRead: StartReadData called");
         }
 
-
-
-
+        // (Você tinha uma rotina alternativa InitRead2 com LogToFile) Mantive porém adicionei TransducerLogger
         private void InitRead2()
         {
             LogToFile("---------- InitRead");
 
-            // Log para o SetZeroTorque
+            TransducerLogger.Log("InitRead2: Enviando comando: SetZeroTorque");
             LogToFile("Enviando comando: SetZeroTorque");
             Trans.SetZeroTorque();
             System.Threading.Thread.Sleep(10); // Atraso de 10 ms
 
-            // Log para o SetZeroAngle
+            TransducerLogger.Log("InitRead2: Enviando comando: SetZeroAngle");
             LogToFile("Enviando comando: SetZeroAngle");
             Trans.SetZeroAngle();
             System.Threading.Thread.Sleep(10); // Atraso de 10 ms
 
-            // Log para o SetTestParameter_ClickWrench
+            TransducerLogger.Log("InitRead2: Enviando comando: SetTestParameter_ClickWrench(30,30,20)");
             LogToFile("Enviando comando: SetTestParameter_ClickWrench(30, 30, 20)");
             Trans.SetTestParameter_ClickWrench(30, 30, 20);
 
-            // Log para o SetTestParameter
             LogToFile("Enviando comando: SetTestParameter com os seguintes parâmetros:");
+            TransducerLogger.Log("InitRead2: Enviando comando: SetTestParameter (parameters logged to file)");
             LogToFile($"Datainfo: {Datainfo}");
             LogToFile($"TesteType: {TesteType.TorqueOnly}");
             LogToFile($"ToolType: {ToolType.ToolType1}");
@@ -222,33 +251,40 @@ namespace Transducer_Estudo
 
             System.Threading.Thread.Sleep(100); // Atraso de 100 ms
 
-            // Log para o StartReadData
             LogToFile("Enviando comando: StartReadData");
+            TransducerLogger.Log("InitRead2: Enviando comando: StartReadData");
             Trans.StartReadData();
-
-
         }
 
 
+        // Método auxiliar de log em arquivo que você já tem. Mantive.
         private void LogToFile(string message)
         {
             string logFilePath = "C:\\Users\\achia\\Centigrama\\transducer_log.txt";
-            using (StreamWriter sw = new StreamWriter(logFilePath, true))
+            try
             {
-                sw.WriteLine($"{DateTime.Now}: {message}");
+                using (StreamWriter sw = new StreamWriter(logFilePath, true))
+                {
+                    sw.WriteLine($"{DateTime.Now}: {message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                TransducerLogger.LogException(ex, "LogToFile error");
             }
         }
 
 
+        // Recebe os resultados de teste (lista de DataResult) - adicionamos logs sobre o resultado final (FR)
         private void TesteResultReceiver(List<DataResult> Result)
         {
-
+            TransducerLogger.LogFmt("TesteResultReceiver called - results count: {0}", Result?.Count ?? 0);
             Debug.Print("SHOW AT SCREEN " + System.Environment.TickCount);
             DataResult Data = Result.Where(x => x.Type == "FR").FirstOrDefault();
 
-
             if (Data == null)
             {
+                TransducerLogger.Log("TesteResultReceiver: no 'FR' result found - triggering InitRead again");
                 lblUntighteningsCounter.BeginInvoke((MethodInvoker)delegate
                 {
                     lblUntighteningsCounter.Text = (++UntighteningsCounter).ToString();
@@ -257,6 +293,8 @@ namespace Transducer_Estudo
                 return;
             }
 
+            // Loga o resultado final encontrado
+            TransducerLogger.LogFmt("TesteResultReceiver: FR result - Torque={0} Angle={1}", Data.Torque, Data.Angle);
 
             lblResultsCounter.BeginInvoke((MethodInvoker)delegate
             {
@@ -268,12 +306,9 @@ namespace Transducer_Estudo
                 lblAngulo.Text = Data.Angle.ToString() + "º";
             });
 
-
             lblTorque.BeginInvoke((MethodInvoker)delegate
             {
-
                 lblTorque.Text = Data.Torque.ToString() + "Nm";
-
             });
 
             string s = "";
@@ -282,49 +317,30 @@ namespace Transducer_Estudo
                 s += (Result[i].Torque.ToString() + "\r\n");
             }
 
-            //txtGraph.BeginInvoke((MethodInvoker)delegate
-            //{
-                //txtGraph.Text = s;
-            //});
             Debug.Print("SHOW AT SCREEN END" + System.Environment.TickCount);
 
             InitRead();
             Debug.Print("AFTER RECONFIG " + System.Environment.TickCount);
-
-
-
-
-
         }
 
 
 
 
 
+        // Recebe DataResult (cada TQ) - adicionamos logs para acompanhar frequência e valores
         private void ResultReceiver(DataResult Data)
         {
-
+            TransducerLogger.LogFmt("ResultReceiver called - Torque={0} Angle={1}", Data.Torque, Data.Angle);
 
             lblAngulo.BeginInvoke((MethodInvoker)delegate
             {
-
                 lblAngulo1.Text = Data.Angle.ToString() + " º";
             });
 
-
             lblTorque.BeginInvoke((MethodInvoker)delegate
             {
-
                 lblTorque1.Text = Data.Torque.ToString() + " Nm";
-
             });
-
-            //lblTest.BeginInvoke((MethodInvoker)delegate
-            //{
-
-                //lblTest.Text = (Datainfo.TorqueLimit * Data.Torque) / 65M + " Nm";
-
-            //});
 
             lblUpdateTorque.BeginInvoke((MethodInvoker)delegate
             {
@@ -340,72 +356,55 @@ namespace Transducer_Estudo
             }
             Debug.Print("tq:" + Data.Torque.ToString("F2") + " " + System.Environment.TickCount + " span:" + (System.Environment.TickCount - tickLastUpdateTorque));
             tickLastUpdateTorque = System.Environment.TickCount;
-
-
-
-
         }
 
+        // Botão para parar leitura: adiciona log
         private void button3_Click(object sender, EventArgs e)
         {
+            TransducerLogger.Log("button3_Click - StopReadData called");
             Trans.StopReadData();
             tickLastUpdateTorque = 0;
         }
 
+        // Botão conectar via IP / TCP - adicionamos logs
         private void btnConnectIP_Click(object sender, EventArgs e)
         {
-            //if (rdbSCS.Checked)
-            //{
-                //MessageBox.Show("Selecione o Transdutor M.Shimizu!", "Erro!");
+            TransducerLogger.Log("btnConnectIP_Click - starting IP connection flow");
 
-            //}
+            if (Trans != null)
+                //TransducerLogger.LogFmt("dentro do botão connect Ip" ,Trans);
+                //TransducerLogger.LogFmt("StartService_Eth: discarded initial bytes={0} msg='{1}'", bytes, message);
 
-            //else
-            //{
+            {
+                TransducerLogger.Log("btnConnectIP_Click - stopping previous transducer (StopReadData/StopService)");
+                Trans.StopReadData();
+                Trans.StopService();
+            }
 
+            Trans = new PhoenixTransducer();
+            Trans.DataResult += new DataResultReceiver(ResultReceiver);
+            Trans.TesteResult += new DataTesteResultReceiver(TesteResultReceiver);
 
+            Trans.SetPerformance(ePCSpeed.Slow, eCharPoints.Many);
 
+            Trans.Eth_IP = txtIP.Text;
+            // OBS: Eth_Port tem apenas 'set' no PhoenixTransducer, não tem 'get' — por isso usamos um literal/variável aqui
+            Trans.Eth_Port = 23;
+            Trans.PortIndex = Convert.ToInt32(txtIndex.Text);
 
-                if (Trans != null)
-                {
-                    Trans.StopReadData();
-                    Trans.StopService();
-                }
+            // ERRO anterior: você tentou ler Trans.Eth_IP / Trans.Eth_Port aqui, mas propriedades são write-only.
+            // Em vez disso, registremos os valores disponíveis no formulário.
+            TransducerLogger.LogFmt("btnConnectIP_Click - connecting to IP {0}:{1}", txtIP.Text, 23);
 
+            Trans.StartService();
+            Trans.StartCommunication();
+            Trans.RequestInformation();
 
-                //if (rdbSCS.Checked)
-                    //Trans = new Transducer();
-                //else
-                    Trans = new PhoenixTransducer();
-                //Trans.RaiseError += new ErrorReceiver(ErrorReceiver);
-                //Trans.RaiseEvent += new EventReceiver(EventReceiver);
-                Trans.DataResult += new DataResultReceiver(ResultReceiver);
-                //Trans.DataInformation += new DataInformationReceiver(InformationReceiver);
-                Trans.TesteResult += new DataTesteResultReceiver(TesteResultReceiver);
-                //Trans.DebugInformation += new DebugInformationReceiver(DebugReceiver);
-                //Trans.CountersInformation += new CountersInformationReceiver(CountersReceiver);
+            TransducerLogger.Log("btnConnectIP_Click - started service, requested info, timer started");
+            timer1.Start();
+        }
 
-            
-
-
-                //string[] s = new string[2];
-                //s[0] = "1";
-                //if (this.chkSimulAng.Checked)
-                //s[1] = "1";
-
-                //Trans.SetTests(s);
-
-                Trans.SetPerformance(ePCSpeed.Slow, eCharPoints.Many);
-
-                Trans.Eth_IP = txtIP.Text;
-                Trans.Eth_Port = 23;
-                Trans.PortIndex = Convert.ToInt32(txtIndex.Text);
-                Trans.StartService();
-                Trans.StartCommunication();
-                Trans.RequestInformation();
-                timer1.Start();
-         }
-
+        // Botão desconectar - log
         private void btnDisconnect2_Click(object sender, EventArgs e)
         {
             btnDisconnect_Click(sender, e);
@@ -413,24 +412,23 @@ namespace Transducer_Estudo
 
         private void btnDisconnect_Click(object sender, EventArgs e)
         {
-            //lblTemp.Text = "0";
-            //lblVoltage.Text = "0";
-            //txtKeyName.Text = "";
-            //txtAutoPowerOff.Text = "";
-            //txtTorqueLimit.Text = "";
-            //txtFullScale.Text = "";
-            //txtDeviceType.Text = "";
-            //txtCommunicationType.Text = "";
-            //txtFW.Text = "";
-            //txtHW.Text = "";
-            //txtHardID.Text = "";
-
-
+            TransducerLogger.Log("btnDisconnect_Click - stopping timer, StopReadData and StopService");
             timer1.Stop();
-            Trans.StopReadData();
-            Trans.StopService();
+            if (Trans != null)
+            {
+                Trans.StopReadData();
+                Trans.StopService();
+            }
 
             //ClearForm();
+        }
+
+        private void timer1_Tick(object sender, EventArgs e)
+        {
+
+            //TransducerLogger.Log("Log dentro do timer");
+            //TransducerLogger.LogFmt("Timer tick at {0}", DateTime.Now.ToString("HH:mm:ss.fff"));
+
         }
     }
 }

@@ -10,14 +10,18 @@ using System.Threading;
 
 using System.IO;
 using System.Reflection;
-using System.Windows.Forms;   
+using System.Windows.Forms;
 using System.Linq;
 using System.Net.Sockets;
 
-
+// Logger namespace (assegure que TransducerLogger.cs esteja neste namespace)
+using Transducer_Estudo;
 
 namespace Transducers
 {
+    // PhoenixTransducer - versão instrumentada com TransducerLogger
+    // - Mantive lógica original; adicionei logs não-invasivos em pontos estratégicos
+    // - Comentários explicam cada inserção
     public class PhoenixTransducer : ITransducer
     {
         DebugInformation debug = new DebugInformation();
@@ -33,7 +37,7 @@ namespace Transducers
         private const int BAUDRATE_USB = 115200;
         private const int BAUDRATE_BLUETOOTH = 38400;
 
-        private System.Timers.Timer TimerItem=null;
+        private System.Timers.Timer TimerItem = null;
 
         private string _PortName = String.Empty;
         private string _Eth_IP = String.Empty;
@@ -42,12 +46,12 @@ namespace Transducers
         private int _PortIndex = 0;
         private bool _IsConnected = false;
 
-        private bool simulateChartBlockFail = false;           
-        private int countSimulateGoodChartBlocksBeforeFail = 3;              
- 
-        private int iConsecErrs = 0;    
-        private int iConsecTimeout_OR_InvalidAnswer = 0;        
-        private int iConsecErrsUnknown = 0;      
+        private bool simulateChartBlockFail = false;
+        private int countSimulateGoodChartBlocksBeforeFail = 3;
+
+        private int iConsecErrs = 0;
+        private int iConsecTimeout_OR_InvalidAnswer = 0;
+        private int iConsecErrsUnknown = 0;
         private enum eState
         {
             eIdle,
@@ -94,27 +98,27 @@ namespace Transducers
         private int TickRXCommand = System.Environment.TickCount;
         private string _id = "000000000000";
 
-        private const int DEF_MAX_ERRS = 60;                                     
+        private const int DEF_MAX_ERRS = 60;
 
-        private int DEF_SLOW_TIMER_INTERVAL = 40; 
+        private int DEF_SLOW_TIMER_INTERVAL = 40;
         private const int DEF_FAST_TIMER_INTERVAL = 1;
 
         private const int TRIES_BAUD = 1;
-        private const int DEF_TIMESPAN_TIMEOUT_ID = 500;           
-        private const int DEF_TIMESPAN_TIMEOUT_READ = 400;         
-        private int DEF_TIMESPAN_BETWEENREADS = 100; 
-        private int DEF_TIMESPAN_BETWEENREADS_TRACING = 100; 
+        private const int DEF_TIMESPAN_TIMEOUT_ID = 500;
+        private const int DEF_TIMESPAN_TIMEOUT_READ = 400;
+        private int DEF_TIMESPAN_BETWEENREADS = 100;
+        private int DEF_TIMESPAN_BETWEENREADS_TRACING = 100;
         private const int DEF_TIMESPAN_TIMEOUT_REQUESTINFORMATION = 500;
-        private const int DEF_TIMESPAN_ABORTGARBAGE = 300;                  
+        private const int DEF_TIMESPAN_ABORTGARBAGE = 300;
         private const int DEF_TIMESPAN_AQUISITIONCONFIG = 200;
-        private const int DEF_TIMESPAN_GETSTATUS = 1200;                  
-        private const int DEF_TIMESPAN_WAITCHARTBLOCK = 500;   
-        private const int DEF_TIMESPAN_TIMEOUT_ZERO = 300;                            
+        private const int DEF_TIMESPAN_GETSTATUS = 1200;
+        private const int DEF_TIMESPAN_WAITCHARTBLOCK = 500;
+        private const int DEF_TIMESPAN_TIMEOUT_ZERO = 300;
         private const int DEF_TIMESPAN_TIMEOUT_CONFIGURATION = 500;
         private const int DEF_TIMESPAN_GETDEVICESTATUS = 1200;
         private const int DEF_TIMESPAN_TIMEOUT_DEVICESTATUS = 400;
         private const int DEF_TIMESPAN_TIMEOUT_CALIBRATE = 400;
-        private const int DEF_TIMESPAN_TIMEOUT_COUNTERS = 300;     
+        private const int DEF_TIMESPAN_TIMEOUT_COUNTERS = 300;
 
 
         private const int DEF_MIN_THRESHOLD = 0;
@@ -128,7 +132,7 @@ namespace Transducers
         private const int DEF_MIN_FILTERFREQUENCY = 500;
         private const int DEF_MAX_FILTERFREQUENCY = 20000;
         private const int DEF_MAX_BLOCKSIZE = 100;
-        private int DEF_MAX_GRAPHSIZE = 2000;       
+        private int DEF_MAX_GRAPHSIZE = 2000;
 
 
         private const int DEF_MIN_CLICKFALL = 1;
@@ -139,7 +143,7 @@ namespace Transducers
         private const int DEF_MAX_CLICKWIDTH_MS = 250;
 
 
-        private const int DEF_MIN_TORQUEOFFSET = 0;         
+        private const int DEF_MIN_TORQUEOFFSET = 0;
         private const int DEF_MAX_TORQUEOFFSET = 0x7FFFFF;
         private const int DEF_MIN_TORQUETARGET = 0;
         private const int DEF_MAX_TORQUETARGET = 0x7FFFFF;
@@ -162,9 +166,9 @@ namespace Transducers
 
 
 
-        private const int DEF_NVRAM_MAX_PAGE_SIZE =     64;
-        private const int DEF_NVRAM_MIN_PAGE_SIZE  =   1;
-        private const int DEF_NVRAM_MAX_ADDRESS     =  0x1E0B;
+        private const int DEF_NVRAM_MAX_PAGE_SIZE = 64;
+        private const int DEF_NVRAM_MIN_PAGE_SIZE = 1;
+        private const int DEF_NVRAM_MAX_ADDRESS = 0x1E0B;
         private const int DEF_NVRAM_MIN_ADDRESS = 0x0000;
 
         private const int DEF_CW = 0;
@@ -183,14 +187,14 @@ namespace Transducers
 
 
 
-        private const int RastSize = 30;         
+        private const int RastSize = 30;
         private string[] RastCommands = new string[RastSize];
         private int[] RastTX = new int[RastSize];
         private int[] RastRX = new int[RastSize];
-        private int[] RastAdditional = new int[RastSize]; 
+        private int[] RastAdditional = new int[RastSize];
         private double[] RastAdditionalD = new double[RastSize];
         private string[] RastAdditionalS = new string[RastSize];
-        private int countGraphsComplete=0;
+        private int countGraphsComplete = 0;
 
 
         private struct sFlags
@@ -205,7 +209,7 @@ namespace Transducers
             public bool MustSendZeroTorque;
             public bool MustSendZeroAngle;
             public bool MustConfigure;
-            public bool NewConfiguragion;          
+            public bool NewConfiguragion;
             public bool MustCalibrate;
             public bool MustSendGetCounters;
 
@@ -235,7 +239,7 @@ namespace Transducers
         {
             public ToolType ToolType;
             public decimal Threshold;
-            public decimal ThresholdEnd; 
+            public decimal ThresholdEnd;
             public int TimeoutEnd_ms;
             public int TimeStep_ms;
             public int FilterFrequency;
@@ -263,7 +267,7 @@ namespace Transducers
 
 
         enum eAquisitionState
-        { 
+        {
             Idle = 0,
             Threshold,
             Timeout,
@@ -295,18 +299,18 @@ namespace Transducers
             public int samples;
         }
         sBlocks _blocks;
-        int _awaitedsize = 0;                   
-        public const bool DEF_IGNOREGRAPHCRC = true;  
-        
-        private int ixHigherTQ;       
-        private decimal higherTQ;    
+        int _awaitedsize = 0;
+        public const bool DEF_IGNOREGRAPHCRC = true;
+
+        private int ixHigherTQ;
+        private decimal higherTQ;
 
         private int iChart = 0;
 
 
         struct eCheckTimeSpans
         {
-            public int tick_tighteningfinished ;
+            public int tick_tighteningfinished;
             public int tick_endcalcs;
             public int tick_tx;
             public int tick_datareceived;
@@ -315,7 +319,7 @@ namespace Transducers
             public int tick_endall;
         }
         eCheckTimeSpans ticks;
-        
+
         bool waitans = false;
         private int TryCout = 0;
         private string LastPackage = "";
@@ -332,7 +336,7 @@ namespace Transducers
         private const int DEF_MEASURE_OK = 1;
         private const int DEF_MEASURE_ERR = 2;
         private const int DEF_MEASURE_GARBAGE = 3;
-        private const int DEF_MAX_SIGNALMEASURES = 50;           
+        private const int DEF_MAX_SIGNALMEASURES = 50;
         private struct sSignalMeasure
         {
             public int iTickTX;
@@ -343,8 +347,8 @@ namespace Transducers
         }
         sSignalMeasure signalmeasure;
 
-        private bool _bUserStartService = false;          
-        private bool _bPortOpen = false;                     
+        private bool _bUserStartService = false;
+        private bool _bPortOpen = false;
 
         System.IO.Ports.SerialDataReceivedEventHandler HandlerDataReceiver;
         public PhoenixTransducer()
@@ -359,9 +363,9 @@ namespace Transducers
 
             SetTimer();
 
-            
+
             SerialPort.ReadTimeout = SerialPort.WriteTimeout = 7000;
-            
+
             _IsConnected = false;
             flags.tickDeviceStatus = System.Environment.TickCount;
 
@@ -397,7 +401,7 @@ namespace Transducers
             }
             catch { }
         }
-        private void Write2Log(string msg, bool force = false, bool append=true)
+        private void Write2Log(string msg, bool force = false, bool append = true)
         {
             Debug.Print(msg);
 
@@ -413,7 +417,7 @@ namespace Transducers
                         string sname = "Logs\\" + slook + "-" + DateTime.Now.ToString("yyyyMMdd") + ".dat";
                         using (StreamWriter writetext = new StreamWriter(sname, append))
                         {
-                            writetext.WriteLine(msg + (force?" " + System.Environment.TickCount:""));
+                            writetext.WriteLine(msg + (force ? " " + System.Environment.TickCount : ""));
                             writetext.Flush();
                         }
                     }
@@ -432,6 +436,8 @@ namespace Transducers
                     _bUserStartService = value;
 
                     Write2Log("-- USER START SERVICE: " + value);
+                    // LOG adicional
+                    try { TransducerLogger.LogFmt("USER START SERVICE: {0}", value); } catch { }
                 }
             }
         }
@@ -445,18 +451,19 @@ namespace Transducers
                     _bPortOpen = value;
 
                     Write2Log("-- PORT OPEN: " + value);
+                    try { TransducerLogger.LogFmt("PORT OPEN: {0}", value); } catch { }
                 }
             }
         }
 
-        private void SetTimer(bool start=false)
+        private void SetTimer(bool start = false)
         {
             lock (objtimerlock)
             {
                 if (TimerItem == null)
                 {
                     shutdown = false;
-                    TimerItem = new System.Timers.Timer(100);    
+                    TimerItem = new System.Timers.Timer(100);
                     TimerItem.Elapsed += dispatcherTimer_Tick;
                     TimerItem.AutoReset = false;
                     TimerItem.Enabled = true;
@@ -482,7 +489,7 @@ namespace Transducers
         }
         public static string makeCRC(string cmd)
         {
-            char[] Res = new char[2];                             
+            char[] Res = new char[2];
             char[] CRC = new char[8];
             int i, j, k;
             char DoInvert;
@@ -502,12 +509,12 @@ namespace Transducers
                 }
             }
 
-            for (i = 0; i < 8; ++i)                                    
+            for (i = 0; i < 8; ++i)
                 CRC[i] = (char)0;
 
             for (i = 0; i < BitString.Length; ++i)
             {
-                if (BitString[i] == '1')                     
+                if (BitString[i] == '1')
                     DoInvert = (char)(CRC[7] ^ 1);
                 else
                     DoInvert = CRC[7];
@@ -537,14 +544,16 @@ namespace Transducers
         {
             try
             {
-                    flags.MustSendRequestInformation = true;
+                flags.MustSendRequestInformation = true;
                 SetTimer(true);
-                
+
                 TryCout++;
+                TransducerLogger.Log("RequestInformation called - MustSendRequestInformation set true");
             }
             catch (Exception err)
             {
 
+                TransducerLogger.LogException(err, "RequestInformation exception");
                 throw err;
             }
         }
@@ -565,9 +574,12 @@ namespace Transducers
                     flags.Configuration = Line.ToString() + '\r';
                     flags.MustConfigure = true;
                     flags.NewConfiguragion = true;
+
+                    TransducerLogger.Log("WriteSetup: flags.MustConfigure set true");
                 }
                 catch (Exception err)
                 {
+                    TransducerLogger.LogException(err, "WriteSetup exception");
                     throw err;
                 }
             }
@@ -577,8 +589,8 @@ namespace Transducers
         {
             switch (_aquisitionstatus.state)
             {
-                case(eAquisitionState.Threshold):
-                case(eAquisitionState.Timeout):
+                case (eAquisitionState.Threshold):
+                case (eAquisitionState.Timeout):
                     return DEF_TIMESPAN_BETWEENREADS_TRACING;
 
                 case (eAquisitionState.Idle):
@@ -612,7 +624,7 @@ namespace Transducers
                         level = 30;
                         break;
                     case BAT_FAULT_CHARGE:
-                    case BAT_CHARGING:                             
+                    case BAT_CHARGING:
                     case BAT_NOT_DETECTED:
                     case BAT_CRITICAL_LEVEL:
                         level = 15;
@@ -630,12 +642,12 @@ namespace Transducers
         {
             if (signalmeasure.lmeasure.Count > 10)
             {
-                if (debug.Type == 0 && debug.Interface == 1)            
+                if (debug.Type == 0 && debug.Interface == 1)
                     return 0;
                 return debug.Interface;
             }
             else
-                return -1;        
+                return -1;
         }
         private bool GetValidBatteryInfo()
         {
@@ -644,14 +656,14 @@ namespace Transducers
         public bool GetMeasures(out int ptim, out int pok, out int perr, out int pgarb, out int iansavg, out bool validbateryinfo, out int batterylevel, out bool charging, out int Interface, out int laststatetimeout, out int laststateerr)
         {
             bool bok = false;
-            
+
             ptim = 0;
             pok = 0;
             perr = 0;
             pgarb = 0;
             iansavg = 0;
 
-            validbateryinfo = GetValidBatteryInfo(); 
+            validbateryinfo = GetValidBatteryInfo();
             charging = GetbatteryCharging();
             batterylevel = GetbatteryLevel();
             Interface = GetInterface();
@@ -659,7 +671,7 @@ namespace Transducers
             laststateerr = signalmeasure.laststateerr;
             try
             {
-                
+
                 lock (signalmeasure.lmeasure)
                 {
                     while (signalmeasure.lmeasure.Count > DEF_MAX_SIGNALMEASURES)
@@ -677,7 +689,7 @@ namespace Transducers
                         int isum = itim + iok + ierr;
                         float ffac = 100.0F / (float)isum;
                         ptim = (int)Math.Round(itim * ffac, 0);
-                        pok = (int)Math.Round(iok * ffac, 0); 
+                        pok = (int)Math.Round(iok * ffac, 0);
                         perr = (int)Math.Round(ierr * ffac, 0);
                         pgarb = (int)Math.Round(igarb * ffac, 0);
 
@@ -685,7 +697,7 @@ namespace Transducers
                         bok = true;
                     }
                 }
-                
+
             }
             catch
             {
@@ -693,11 +705,14 @@ namespace Transducers
             }
             return bok;
         }
-        private string slogprev=null;
+        private string slogprev = null;
         private void dispatcherTimer_Tick(object sender, System.Timers.ElapsedEventArgs e)
         {
             try
             {
+                // Log rápido do timer para acompanhar estado periódico
+                TransducerLogger.LogFmt("TimerTick entry: state={0} tick_tx={1} tick_datareceived={2}", _state, ticks.tick_tx, ticks.tick_datareceived);
+
                 lock (signalmeasure.lmeasure)
                 {
                     try
@@ -720,27 +735,28 @@ namespace Transducers
                         try
                         {
                             string slog = "f:"
-                                        + (flags.MustSendGetID ? "MSID," : "") 
-                                        + (flags.MustConfigure ? "MConf," : "") 
-                                        + (flags.MustSendZeroTorque ? "MSZT," : "") 
-                                        + (flags.MustSendZeroAngle ? "MSZA," : "") 
-                                        + (flags.MustSendTorqueOffset ? "MSTO," : "") 
-                                        + (flags.MustCalibrate ? "MCal," : "") 
-                                        + (flags.MustSendTorqueOffset ? "MSTO," : "") 
-                                        + (flags.MustSendRequestInformation ? "MSRI," : "") 
-                                        + (flags.MustSendGetChartBlock ? "MSGCB," : "") 
-                                        + (flags.MustSendAquisitionConfig ? "MSAC," : "") 
-                                        + (flags.MustSendAquisitionClickWrenchConfig ? "MSACWC," : "") 
+                                        + (flags.MustSendGetID ? "MSID," : "")
+                                        + (flags.MustConfigure ? "MConf," : "")
+                                        + (flags.MustSendZeroTorque ? "MSZT," : "")
+                                        + (flags.MustSendZeroAngle ? "MSZA," : "")
+                                        + (flags.MustSendTorqueOffset ? "MSTO," : "")
+                                        + (flags.MustCalibrate ? "MCal," : "")
+                                        + (flags.MustSendTorqueOffset ? "MSTO," : "")
+                                        + (flags.MustSendRequestInformation ? "MSRI," : "")
+                                        + (flags.MustSendGetChartBlock ? "MSGCB," : "")
+                                        + (flags.MustSendAquisitionConfig ? "MSAC," : "")
+                                        + (flags.MustSendAquisitionClickWrenchConfig ? "MSACWC," : "")
                                         + (flags.MustSendAquisitionAdditionalConfig ? "MSAAC," : "")
-                                        + (flags.MustSendAquisitionAdditional2Config ? "MSAA2C," : "") 
-                                        + (flags.MustSendGetStatus ? "MSGS," : "") 
-                                        + (flags.MustSendGetCounters ? "MSGC," : "") 
+                                        + (flags.MustSendAquisitionAdditional2Config ? "MSAA2C," : "")
+                                        + (flags.MustSendGetStatus ? "MSGS," : "")
+                                        + (flags.MustSendGetCounters ? "MSGC," : "")
                                         + (flags.MustSendReadData ? "MSRD," : "")
                                         ;
                             if (slog != slogprev)
                             {
                                 Write2Log(slog);
                                 slogprev = slog;
+                                TransducerLogger.LogFmt("Flags snapshot: {0}", slog);
                             }
                         }
                         catch { }
@@ -753,7 +769,7 @@ namespace Transducers
                             commandtest = "";
                             serialPort_DataReceived(null, null);
                         }
-                        if (_IsConnected)    
+                        if (_IsConnected)
                         {
                             if (flags.MustSendGetID || (_id == "000000000000"))
                             {
@@ -861,7 +877,7 @@ namespace Transducers
                         }
                         else
                         {
-                            SetState(eState.eIdle);      
+                            SetState(eState.eIdle);
                         }
 
                         if (!flags.MustSendGetChartBlock)
@@ -885,7 +901,7 @@ namespace Transducers
                             SetState(eState.eMustSendGetID);
 
                             if (iConsecTimeout_OR_InvalidAnswer % TRIES_BAUD == 0)
-                                ChangeBaudRate();   
+                                ChangeBaudRate();
                         }
                         if (_state == eState.eMustSendGetID)
                         {
@@ -903,7 +919,7 @@ namespace Transducers
                         {
                             SetState(eState.eWaitingConfigure);
                             SendCommand(flags.Configuration);
-                            flags.NewConfiguragion = false;  
+                            flags.NewConfiguragion = false;
                         }
 
                         if (_state == eState.eWaitingDeviceStatus && Timeouted(TickTXCommand, DEF_TIMESPAN_TIMEOUT_DEVICESTATUS, "st:" + _state.ToString()))
@@ -937,7 +953,7 @@ namespace Transducers
                             btimeouted = true;
                             SetState(eState.eMustSendGetChartBlock);
                             iConsecTimeout_OR_InvalidAnswer++;
-                            if (iConsecErrsUnknown == 4)        
+                            if (iConsecErrsUnknown == 4)
                             {
                                 iConsecErrsUnknown = 0;
                                 bRestartTightening = true;
@@ -951,21 +967,22 @@ namespace Transducers
                                 SetState(eState.eWaitingChartBlock);
                                 if (_blocks.block.Length > _blocks.indextoask)
                                 {
-                                        SendCommand(
-                                            _id +
-                                            "GD" +       
-                                            _blocks.block[_blocks.indextoask, DEF_COLUMN_STARTINDEX].ToString("X4") +   
-                                            _blocks.block[_blocks.indextoask, DEF_COLUMN_SIZE].ToString("X2") +  
-                                            _blocks.step.ToString("X2")  
-                                            ,
-                                            18 + _blocks.block[_blocks.indextoask, DEF_COLUMN_SIZE] * 5
-                                            );
-                                        
+                                    SendCommand(
+                                        _id +
+                                        "GD" +
+                                        _blocks.block[_blocks.indextoask, DEF_COLUMN_STARTINDEX].ToString("X4") +
+                                        _blocks.block[_blocks.indextoask, DEF_COLUMN_SIZE].ToString("X2") +
+                                        _blocks.step.ToString("X2")
+                                        ,
+                                        18 + _blocks.block[_blocks.indextoask, DEF_COLUMN_SIZE] * 5
+                                        );
+
                                 }
                                 else
                                 {
                                     SetState(eState.eIdle);
                                     Debug.Print("ALGORITHM PROBLEM");
+                                    TransducerLogger.Log("ALGORITHM PROBLEM: _blocks length mismatch");
                                 }
                             }
                             else
@@ -1058,7 +1075,7 @@ namespace Transducers
 
                             SetState(eState.eWaitingCalibrate);
                             double ft = 0;
-                            if (flags.Calibrate_AppliedTorque!=0 && flags.Calibrate_CurrentTorque != 0)
+                            if (flags.Calibrate_AppliedTorque != 0 && flags.Calibrate_CurrentTorque != 0)
                                 ft = (double)(flags.Calibrate_AppliedTorque / flags.Calibrate_CurrentTorque);
                             else
                                 ft = 1;
@@ -1071,9 +1088,9 @@ namespace Transducers
                             SendCommand(_id + "CW" +
                                 ((int)(TorqueConversionFactor * ft / 0.000000000001)).ToString("X8") +
                                 ((int)(AngleConversionFactor * fa / 0.001)).ToString("X8") +
-                                "00000000" + 
-                                "00000000" + 
-                                "00000000" 
+                                "00000000" +
+                                "00000000" +
+                                "00000000"
                                 );
 
                         }
@@ -1088,14 +1105,14 @@ namespace Transducers
                         {
                             SetState(eState.eWaitingAquisitionConfig);
                             string s = _id + "SA" +
-                                ((int)(LimitThreshold(Nm2AD(AquisitionConfig.Threshold)))).ToString("X8") +  
+                                ((int)(LimitThreshold(Nm2AD(AquisitionConfig.Threshold)))).ToString("X8") +
                                 ((int)(LimitThresholdEnd(Nm2AD(AquisitionConfig.ThresholdEnd)))).ToString("X8") +
                                 ((int)(LimitTimeoutEnd_ms(AquisitionConfig.TimeoutEnd_ms))).ToString("X4") +
                                 ((int)(LimitTimeStep_ms(AquisitionConfig.TimeStep_ms))).ToString("X4") +
                                 ((int)(LimitFilterFrequency(AquisitionConfig.FilterFrequency))).ToString("X4") +
                                 ((int)AquisitionConfig.Dir).ToString("X2") +
                                 ((int)AquisitionConfig.ToolType).ToString("X2");
-                                
+
                             SendCommand(s);
                         }
 
@@ -1134,7 +1151,7 @@ namespace Transducers
                                 ((int)(LimitAngleTarget(ConvertAngleToBus(AquisitionConfig.AngleTarget)))).ToString("X8") +
                                 ((int)(LimitAngleMax(ConvertAngleToBus(AquisitionConfig.AngleMax)))).ToString("X8") +
                                 ((int)(LimitAngleMin(ConvertAngleToBus(AquisitionConfig.AngleMin)))).ToString("X8") +
-                                "00000000"; 
+                                "00000000";
 
                             SendCommand(s);
                         }
@@ -1150,8 +1167,8 @@ namespace Transducers
                             SetState(eState.eWaitingAquisitionAdditional2Config);
                             string s = _id + "SC" +
                                 ((int)(LimitDelayToDetectFirstPeak_ms(AquisitionConfig.DelayToDetectFirstPeak_ms))).ToString("X4") +
-                                ((int)(LimitTimeToIgnoreNewPeak_AfterFinalThreshold_ms(AquisitionConfig.TimeToIgnoreNewPeak_AfterFinalThreshold_ms))).ToString("X4") + 
-                                "000000000000000000000000000000000000000000000000"; 
+                                ((int)(LimitTimeToIgnoreNewPeak_AfterFinalThreshold_ms(AquisitionConfig.TimeToIgnoreNewPeak_AfterFinalThreshold_ms))).ToString("X4") +
+                                "000000000000000000000000000000000000000000000000";
 
                             SendCommand(s);
                         }
@@ -1174,9 +1191,9 @@ namespace Transducers
 #endif
                         }
 
-                        if(btimeouted)
+                        if (btimeouted)
                         {
-                            if (_state != eState.eWaitingAquisitionAdditionalConfig && _state != eState.eWaitingAquisitionAdditional2Config)   
+                            if (_state != eState.eWaitingAquisitionAdditionalConfig && _state != eState.eWaitingAquisitionAdditional2Config)
                             {
                                 lock (signalmeasure.lmeasure)
                                 {
@@ -1184,6 +1201,7 @@ namespace Transducers
                                     signalmeasure.laststatetimeout = (int)_state;
 
                                     Write2Log("timeout");
+                                    TransducerLogger.LogFmt("Timeout detected in state {0}", _state);
                                 }
                             }
                         }
@@ -1191,9 +1209,9 @@ namespace Transducers
 
                         if (bRestartTightening)
                         {
-                            
-                            Write2Log("CANCELING CHART", true);
 
+                            Write2Log("CANCELING CHART", true);
+                            TransducerLogger.Log("CANCELING CHART triggered");
 
                             flags.MustSendGetChartBlock = false;
                             try
@@ -1215,9 +1233,10 @@ namespace Transducers
                         }
 
 
-                        if ((_state != eState.eIdle && iConsecTimeout_OR_InvalidAnswer >= DEF_MAX_ERRS) || iTrashing>3)
+                        if ((_state != eState.eIdle && iConsecTimeout_OR_InvalidAnswer >= DEF_MAX_ERRS) || iTrashing > 3)
                         {
                             Write2Log("dt max err s" + iConsecTimeout_OR_InvalidAnswer + " " + iTrashing);
+                            TransducerLogger.LogFmt("Too many timeouts/errors: iConsecTimeout_OR_InvalidAnswer={0} iTrashing={1}", iConsecTimeout_OR_InvalidAnswer, iTrashing);
 
 
                             iConsecTimeout_OR_InvalidAnswer = 0;
@@ -1228,28 +1247,16 @@ namespace Transducers
                             flags = new sFlags();
 
                             StopService();
-
-                            //try
-                            //{
-                                //if (RaiseError != null)
-                                //{
-                                    //if (enableraiseerrors)
-                                       // RaiseError(100);
-                                //}
-                           // }
-                            //catch { }
-
-
                         }
                     }
-                } 
+                }
             }
             finally
             {
                 try
                 {
                     if (!shutdown)
-                       TimerItem.Enabled = true;
+                        TimerItem.Enabled = true;
                     else
                     {
                         DisposeTimer();
@@ -1259,7 +1266,7 @@ namespace Transducers
             }
         }
 
-        private decimal LimitTorqueOffset(decimal n)  
+        private decimal LimitTorqueOffset(decimal n)
         {
             if (n < DEF_MIN_TORQUEOFFSET) return DEF_MIN_TORQUEOFFSET;
             if (n > DEF_MAX_TORQUEOFFSET) return DEF_MAX_TORQUEOFFSET;
@@ -1271,7 +1278,7 @@ namespace Transducers
             if (n > DEF_MAX_THRESHOLD) return DEF_MAX_THRESHOLD;
             return n;
         }
-        
+
 
         private decimal LimitThresholdEnd(decimal n)
         {
@@ -1303,8 +1310,10 @@ namespace Transducers
             if (n < DEF_MIN_CLICKWIDTH_MS) return DEF_MIN_CLICKWIDTH_MS;
             if (n > DEF_MAX_CLICKWIDTH_MS) return DEF_MAX_CLICKWIDTH_MS;
             return n;
-        }        
- 
+        }
+
+        // Corrige typo em nome da constante (DEF_MAX_TIMESPAN_MS -> DEF_MAX_TIMESTEP_MS)
+        // Mantém comportamento original: limita n entre DEF_MIN_TIMESTEP_MS e DEF_MAX_TIMESTEP_MS
         private int LimitTimeStep_ms(int n)
         {
             if (n < DEF_MIN_TIMESTEP_MS) return DEF_MIN_TIMESTEP_MS;
@@ -1414,19 +1423,20 @@ namespace Transducers
             }
             catch { }
             flags.MustSendRequestInformation = false;
+            TransducerLogger.Log("Test_SimulateRequestInformation: simulated DI delivered");
         }
 
         private int GetTick()
         {
             return System.Environment.TickCount;
         }
-        private bool Timeouted(int tick, int timeout, string printstring=null)
+        private bool Timeouted(int tick, int timeout, string printstring = null)
         {
             bool ret = (System.Environment.TickCount - tick) > timeout;
             if (ret && printstring != null)
             {
                 Write2Log("timeout:" + printstring);
-
+                TransducerLogger.LogFmt("Timeouted: {0} (tick={1} timeout={2})", printstring, tick, timeout);
             }
             return ret;
         }
@@ -1452,7 +1462,7 @@ namespace Transducers
             {
                 for (int i = 0; i < RastCommands.Length; i++)
                 {
-                    if (RastCommands[i] == cmd)   
+                    if (RastCommands[i] == cmd)
                     {
                         RastTX[i] = 0;
                         RastRX[i] = 0;
@@ -1488,13 +1498,13 @@ namespace Transducers
 
             try
             {
-                
+
                 for (int i = 0; i < RastCommands.Length; i++)
                 {
                     if (RastCommands[i] != null)
                     {
                         s += RastCommands[i] + ":";
-                        if(RastRX[i]>0 || RastTX[i]>0)
+                        if (RastRX[i] > 0 || RastTX[i] > 0)
                             s += RastRX[i] + "(" + RastTX[i] + ")";
                         if (RastAdditional[i] > 0)
                             s += " " + RastAdditional[i];
@@ -1505,10 +1515,10 @@ namespace Transducers
                         s += "|";
                     }
                 }
-                
+
             }
-            finally {}
-            return s; 
+            finally { }
+            return s;
         }
         private void AddDoubleToRast(string cmd, double value)
         {
@@ -1516,11 +1526,11 @@ namespace Transducers
             {
                 for (int i = 0; i < RastCommands.Length; i++)
                 {
-                    if (RastCommands[i] == null)   
+                    if (RastCommands[i] == null)
                     {
                         RastCommands[i] = cmd;
                     }
-                    if (RastCommands[i] == cmd)     
+                    if (RastCommands[i] == cmd)
                     {
                         RastAdditionalD[i] = value;
                         break;
@@ -1535,11 +1545,11 @@ namespace Transducers
             {
                 for (int i = 0; i < RastCommands.Length; i++)
                 {
-                    if (RastCommands[i] == null)   
+                    if (RastCommands[i] == null)
                     {
                         RastCommands[i] = cmd;
                     }
-                    if (RastCommands[i] == cmd)     
+                    if (RastCommands[i] == cmd)
                     {
                         RastAdditional[i] = value;
                         break;
@@ -1554,29 +1564,30 @@ namespace Transducers
             {
                 for (int i = 0; i < RastCommands.Length; i++)
                 {
-                    if (RastCommands[i] == null)   
+                    if (RastCommands[i] == null)
                     {
                         RastCommands[i] = cmd;
                     }
-                    if (RastCommands[i] == cmd)     
+                    if (RastCommands[i] == cmd)
                     {
                         RastAdditionalS[i] = value;
                         break;
                     }
                 }
             }
-            catch { }        
+            catch { }
         }
         private void AddToRast(string cmd, bool tx, bool rx, bool additional)
-        { 
-            try{
-                for(int i=0;i<RastCommands.Length;i++)
+        {
+            try
+            {
+                for (int i = 0; i < RastCommands.Length; i++)
                 {
-                    if(RastCommands[i]==null)   
+                    if (RastCommands[i] == null)
                     {
                         RastCommands[i] = cmd;
                     }
-                    if (RastCommands[i]==cmd)     
+                    if (RastCommands[i] == cmd)
                     {
                         if (tx && RastTX[i] < int.MaxValue) RastTX[i]++;
                         if (rx && RastRX[i] < int.MaxValue) RastRX[i]++;
@@ -1584,54 +1595,91 @@ namespace Transducers
                         break;
                     }
                 }
-            }catch{}
+            }
+            catch { }
         }
 
+        // SendCommand: log TX (request and actual framed command). Mantive lógica de tentativas.
+        // Substitua o método SendCommand por este (inclui logs TX em hex e texto)
         private void SendCommand(string cmd, int awaitedsize = 0)
         {
-            for (int i = 0; i < 3; i++) 
+            for (int i = 0; i < 3; i++)
             {
                 try
                 {
                     if (((_Eth_IP == string.Empty || _Eth_IP == null) && SerialPort.IsOpen) || (_Eth_IP != string.Empty && _Eth_IP != null && sck.Connected))
                     {
+                        // LOG: comando solicitado antes de montar CRC
+                        try { TransducerLogger.LogFmt("SendCommand REQUEST: cmd='{0}' awaitedsize={1}", cmd, awaitedsize); } catch { }
+
                         string cmdout = "[" + cmd + makeCRC(cmd) + "]";
                         _awaitedsize = awaitedsize;
 
+                        // LOG: comando final (com CRC) que será enviado (texto)
+                        try { TransducerLogger.LogFmt("TX -> {0}", cmdout); } catch { }
+
+                        // LOG: escrevendo também em hex (bytes que serão enviados)
+                        try
+                        {
+                            byte[] txBytes = Encoding.UTF8.GetBytes(cmdout);
+                            TransducerLogger.LogHex("TX BYTES", txBytes, 0, txBytes.Length);
+                        }
+                        catch { }
+
                         Write2Log("<-TX: " + System.Environment.TickCount + " :" + cmdout);
 
+                        try { AddToRast(cmdout.Substring(13, 2), true, false, false); } catch { }
 
-                        AddToRast(cmdout.Substring(13, 2), true, false, false);
-
-                        if (bClosing) 
+                        if (bClosing)
                         {
                             Write2Log("dtTX closing", true);
+                            TransducerLogger.Log("SendCommand aborted: bClosing true");
                             return;
                         }
 
                         waitans = true;
-                        
+
                         if ((_Eth_IP == string.Empty || _Eth_IP == null) && SerialPort.IsOpen)
+                        {
+                            // LOG: SerialPort write (also hex)
+                            try
+                            {
+                                byte[] txBytes = Encoding.UTF8.GetBytes(cmdout);
+                                TransducerLogger.LogHex("SerialPort TX BYTES", txBytes, 0, txBytes.Length);
+                            }
+                            catch { }
+
                             SerialPort.Write(cmdout);
+                        }
                         else if (_Eth_IP != string.Empty && _Eth_IP != null && sck.Connected)
                         {
-                            
                             Byte[] bs = Encoding.UTF8.GetBytes(cmdout);
-                            swrite.Write(bs, 0, bs.Length);
+                            try
+                            {
+                                // Write + Flush for socket to ensure immediate send
+                                swrite.Write(bs, 0, bs.Length);
+                                try { swrite.Flush(); } catch { }
+                                // LOG bytes sent on socket (hex)
+                                TransducerLogger.LogHex("Socket TX BYTES", bs, 0, bs.Length);
+                            }
+                            catch (Exception exSocket)
+                            {
+                                TransducerLogger.LogException(exSocket, "Socket write error in SendCommand");
+                                throw;
+                            }
                         }
-                        
 
                         TrySendCmd++;
                         TickTXCommand = GetTick();
 
                         ticks.tick_tx = System.Environment.TickCount;
                         signalmeasure.iTickTX = System.Environment.TickCount;
-
                     }
                     else
                     {
 
                         Write2Log("send err " + System.Environment.TickCount);
+                        TransducerLogger.LogFmt("SendCommand ERROR: connection not open (Eth_IP='{0}', SerialOpen={1}, sckConnected={2})", _Eth_IP, SerialPort.IsOpen, (sck != null && sck.Connected));
 
 
                         Internal_StopService();
@@ -1643,8 +1691,8 @@ namespace Transducers
                             {
                                 //if (RaiseError != null)
                                 //{
-                                    //if (enableraiseerrors)
-                                       // RaiseError(105);
+                                //if (enableraiseerrors)
+                                // RaiseError(105);
                                 //}
                             }
                             catch { }
@@ -1652,8 +1700,10 @@ namespace Transducers
                     }
                     break;
                 }
-                catch          
+                catch (Exception ex)
                 {
+                    // Log completo da exceção
+                    TransducerLogger.LogException(ex, "SendCommand exception - retrying");
                     if (bUserStartService && bPortOpen)
                     {
                         Thread.Sleep(25);
@@ -1662,43 +1712,54 @@ namespace Transducers
                 }
             }
         }
+
+
         private void TryToReconnectSerialPort()
         {
             Write2Log("tryrecon");
+            TransducerLogger.Log("TryToReconnectSerialPort called");
 
             if (_Eth_IP != string.Empty && _Eth_IP != null) return;
 
             try
-            {            
+            {
                 if (!SerialPort.IsOpen)
                 {
                     var portExists = SerialPort.GetPortNames().Any(x => x == this._PortName);
                     if (portExists)
                     {
                         SerialPort.PortName = this._PortName;
-                        SerialPort.BaudRate = BAUDRATE_USB;     
+                        SerialPort.BaudRate = BAUDRATE_USB;
                         SerialPort.DataReceived -= HandlerDataReceiver;
                         SerialPort.DataReceived += HandlerDataReceiver;
 
                         Write2Log("Open " + SerialPort.PortName + " " + SerialPort.BaudRate + " " + System.Environment.TickCount);
 
                         SerialPort.RtsEnable = true;
-                        Write2Log("recon open",true); 
+                        Write2Log("recon open", true);
                         SerialPort.Open();
-                        Write2Log("open",true); 
+                        Write2Log("open", true);
+                        TransducerLogger.LogFmt("TryToReconnectSerialPort: re-opened {0} baud {1}", SerialPort.PortName, SerialPort.BaudRate);
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                TransducerLogger.LogException(ex, "TryToReconnectSerialPort exception");
+            }
         }
+
+        // SetState: log de transição de estado
         private void SetState(eState state)
         {
             lock (locker_State)
             {
                 if (_state != state)
                 {
+                    var old = _state;
                     _state = state;
                     Write2Log("state:" + _state);
+                    try { TransducerLogger.LogFmt("SetState: {0} -> {1}", old, state); } catch { }
                 }
             }
         }
@@ -1711,7 +1772,7 @@ namespace Transducers
                 {
                     flags.MustSendGetCounters = true;
                     flags.MustSendGetChartBlock = true;
-                    _aquisitionstatus.state = eAquisitionState.Idle;           
+                    _aquisitionstatus.state = eAquisitionState.Idle;
                 }
             }
         }
@@ -1749,7 +1810,7 @@ namespace Transducers
             return stream.ToArray();
         }
 
-        private int LookForByte(byte[] b, char c, int offset=0)
+        private int LookForByte(byte[] b, char c, int offset = 0)
         {
             for (int i = offset; i < b.Length; i++)
             {
@@ -1764,20 +1825,22 @@ namespace Transducers
         {
             commandtest = command;
             serialPort_DataReceived(null, null);
+            TransducerLogger.Log("SimulateRXData called - queued simulated RX");
         }
 
         public void SetPerformance(ePCSpeed pcspeed, eCharPoints charpoints)
         {
+            TransducerLogger.LogFmt("SetPerformance called: pcspeed={0} charpoints={1}", pcspeed, charpoints);
             switch (pcspeed)
             {
                 case ePCSpeed.Slow:
-                    DEF_SLOW_TIMER_INTERVAL = 100; 
+                    DEF_SLOW_TIMER_INTERVAL = 100;
                     DEF_TIMESPAN_BETWEENREADS = 500;
                     DEF_TIMESPAN_BETWEENREADS_TRACING = 500;
                     break;
 
                 case ePCSpeed.Medium:
-                    DEF_SLOW_TIMER_INTERVAL = 60;   
+                    DEF_SLOW_TIMER_INTERVAL = 60;
                     DEF_TIMESPAN_BETWEENREADS = 250;
                     DEF_TIMESPAN_BETWEENREADS_TRACING = 250;
                     break;
@@ -1792,8 +1855,8 @@ namespace Transducers
 
             switch (charpoints)
             {
-                case eCharPoints.VeryFew:      
-                    DEF_MAX_GRAPHSIZE = 100; 
+                case eCharPoints.VeryFew:
+                    DEF_MAX_GRAPHSIZE = 100;
                     break;
 
                 case eCharPoints.Few:
@@ -1801,7 +1864,7 @@ namespace Transducers
                     break;
 
                 case eCharPoints.Many:
-                    DEF_MAX_GRAPHSIZE = 2000;                 
+                    DEF_MAX_GRAPHSIZE = 2000;
                     break;
 
                 case eCharPoints.Medium:
@@ -1815,7 +1878,7 @@ namespace Transducers
         public bool bSim_Angle = false;
         public void SetTests(string[] s = null)
         {
-            if(s!=null)
+            if (s != null)
             {
                 if (s.Length >= 1)
                 {
@@ -1849,13 +1912,20 @@ namespace Transducers
         int iTrashing = 0;
         byte[] data = new Byte[2048];
         int tickLastTransducerError = System.Environment.TickCount;
+        
+        
+        
+        
+        
+        
         private void serialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
 
             if (!waitans) return;
-            if (bClosing) 
+            if (bClosing)
             {
                 Write2Log("dtRX closing", true);
+                TransducerLogger.Log("serialPort_DataReceived: exit early - bClosing true");
                 return;
             }
 
@@ -1866,6 +1936,9 @@ namespace Transducers
                     {
                         Write2Log("RX ackd", true);
                         ticks.tick_datareceived = System.Environment.TickCount;
+                        TransducerLogger.Log("serialPort_DataReceived: entry");
+                        TransducerLogger.LogFmt("RX entry state={0} waitans={1} _IsConnected={2}", _state, waitans, _IsConnected);
+
                         DataInformation DataInfo = new DataInformation();
                         try
                         {
@@ -1893,9 +1966,9 @@ namespace Transducers
                             while (true)
                             {
                                 bool bTrashing = false;
-                                while (true)  
+                                while (true)
                                 {
-                                    if (bClosing) 
+                                    if (bClosing)
                                     {
                                         Write2Log("dtRX closing", true);
                                         return;
@@ -1904,22 +1977,34 @@ namespace Transducers
                                     {
                                         if (sender != null)
                                         {
-                                            if (sp.IsOpen)              
+                                            if (sp.IsOpen)
                                             {
                                                 tries++;
                                                 try
                                                 {
-
-                                                    offset += sp.Read(bs, offset, (sp.BytesToRead > bs.Length ? bs.Length : sp.BytesToRead));
+                                                    // leitura serial pode retornar N bytes; manter offset como antes
+                                                    int read = sp.Read(bs, offset, (sp.BytesToRead > bs.Length ? bs.Length : sp.BytesToRead));
+                                                    offset += read;
+                                                    // LOG: buffer serial após leitura
+                                                    TransducerLogger.LogFmt("serial.Read read={0} offset={1}", read, offset);
+                                                    TransducerLogger.LogHex("serial RAW buffer", bs, 0, offset);
                                                 }
-                                                catch       
+                                                catch (Exception ex)
                                                 {
+                                                    TransducerLogger.LogException(ex, "serial.Read error - will TryToReconnectSerialPort");
                                                     Thread.Sleep(60);
 
                                                     TryToReconnectSerialPort();
                                                     if (sp.IsOpen)
                                                     {
-                                                        offset += sp.Read(bs, offset, (sp.BytesToRead > bs.Length ? bs.Length : sp.BytesToRead));
+                                                        try
+                                                        {
+                                                            int read2 = sp.Read(bs, offset, (sp.BytesToRead > bs.Length ? bs.Length : sp.BytesToRead));
+                                                            offset += read2;
+                                                            TransducerLogger.LogFmt("serial.Read retry read={0} offset={1}", read2, offset);
+                                                            TransducerLogger.LogHex("serial RAW buffer retry", bs, 0, offset);
+                                                        }
+                                                        catch (Exception ex2) { TransducerLogger.LogException(ex2, "serial.Read retry failed"); }
                                                     }
                                                 }
                                             }
@@ -1928,6 +2013,8 @@ namespace Transducers
                                         {
                                             bs = Encoding.UTF8.GetBytes(commandtest);
                                             offset += bs.Length;
+                                            TransducerLogger.LogFmt("Simulated RX used, offset now {0}", offset);
+                                            TransducerLogger.LogHex("simulated RAW", bs, 0, offset);
                                         }
                                     }
                                     else
@@ -1935,9 +2022,9 @@ namespace Transducers
 
                                         try
                                         {
-                                            if (_IsConnected)    
+                                            if (_IsConnected)
                                             {
-                                                if (sockStream.DataAvailable)   
+                                                if (sockStream.DataAvailable)
                                                 {
                                                     tries++;
                                                     if (bstart)
@@ -1947,6 +2034,9 @@ namespace Transducers
                                                     Int32 bytes = sockStream.Read(data, 0, data.Length);
                                                     if (bytes > 0)
                                                     {
+                                                        TransducerLogger.LogFmt("socket.Read bytes={0}", bytes);
+                                                        TransducerLogger.LogHex("socket RAW", data, 0, bytes);
+
                                                         message += System.Text.Encoding.ASCII.GetString(data, 0, bytes);
                                                         Debug.Print("------ READ ---------:" + message);
                                                         bs = Encoding.UTF8.GetBytes(message);
@@ -1962,6 +2052,7 @@ namespace Transducers
                                         catch (Exception ex)
                                         {
                                             Debug.Print("Err:" + ex.Message + " details:" + (ex.InnerException != null ? ex.InnerException.Message : "") + " " + System.Environment.TickCount);
+                                            TransducerLogger.LogException(ex, "socket.Read exception in serialPort_DataReceived");
                                         }
                                     }
                                     if (offset == 0)
@@ -1969,8 +2060,8 @@ namespace Transducers
                                         break;
                                     }
                                     if (
-                                        (_state != eState.eWaitingID || _PortIndex != 0)                
-                                        || !(_Eth_IP == string.Empty || _Eth_IP == null)             
+                                        (_state != eState.eWaitingID || _PortIndex != 0)
+                                        || !(_Eth_IP == string.Empty || _Eth_IP == null)
                                         )
                                     {
                                         if (
@@ -1980,12 +2071,14 @@ namespace Transducers
                                             )
                                         {
                                             Debug.Print("- ] found -");
+                                            TransducerLogger.Log("']' found in buffer");
                                             break;
                                         }
                                     }
                                     if (Timeouted(tickCheckGarbage, DEF_TIMESPAN_ABORTGARBAGE, "garbage"))
                                     {
                                         Debug.Print("Abort garbage. bytes:" + offset + " as:" + _awaitedsize + " mes:" + message + " s:" + _state + " pi:" + _PortIndex);
+                                        TransducerLogger.LogFmt("Abort garbage: offset={0} awaited={1} state={2}", offset, _awaitedsize, _state);
                                         break;
                                     }
                                     else
@@ -1995,29 +2088,30 @@ namespace Transducers
 
                                         try
                                         {
-                                            Debug.Print(BitConverter.ToString(bs, 0, offset));     
+                                            Debug.Print(BitConverter.ToString(bs, 0, offset));
                                             bool bEr = false;
                                             bspini = LookForByte(bs, '[');
                                             if (bspini < 0)
                                                 bEr = true;
 
-                                            if (bEr)     
+                                            if (bEr)
                                             {
                                                 Debug.Print("only trash. giving up");
                                                 bTrashing = true;
                                                 if (iTrashing < Int32.MaxValue)
                                                     iTrashing++;
+                                                TransducerLogger.Log("only trash in buffer - giving up");
                                                 break;
                                             }
                                         }
                                         catch { }
                                     }
-                                    Thread.Sleep(10); 
+                                    Thread.Sleep(10);
 
-                                }   
+                                }
 
 
-                                if (offset == 0)   
+                                if (offset == 0)
                                 {
                                     break;
                                 }
@@ -2025,13 +2119,14 @@ namespace Transducers
                                 {
                                     break;
                                 }
-                                if (offset > 0)   
+                                if (offset > 0)
                                 {
                                     if (_awaitedsize > 0 && bspend == 0 && offset >= _awaitedsize)
-                                        bspend = _awaitedsize - 2;     
+                                        bspend = _awaitedsize - 2;
 
                                     string sall = System.Text.Encoding.UTF8.GetString(bs, 0, bs.Length);
                                     Debug.Print("->RX(s all):" + sall);
+                                    TransducerLogger.LogFmt("RX raw all (len={0}): {1}", offset, sall);
 
                                     bspini = LookForByte(bs, '[');
                                     bspend = LookForByte(bs, ']', bspend + 1);
@@ -2042,39 +2137,56 @@ namespace Transducers
                                         string s = System.Text.Encoding.UTF8.GetString(bs, bspini + 1, bspend - bspini - 3);
                                         Debug.Print("->RX(s one):" + s);
 
+                                        // LOG do payload candidato e do pacote bruto
+                                        TransducerLogger.LogFmt("PARSER candidate len={0} s='{1}'", s.Length, s);
+                                        TransducerLogger.LogHex("PARSER packet raw", bs, bspini, bspend - bspini + 1);
+
                                         if (_awaitedsize == 0 ||
                                                 bspend - bspini + 1 == _awaitedsize ||
-                                                (bspend - bspini == 0x13 && bs[13 + bspini] == 0x45 && bs[14 + bspini] == 0x52) 
+                                                (bspend - bspini == 0x13 && bs[13 + bspini] == 0x45 && bs[14 + bspini] == 0x52)
                                             )
                                         {
-                                            if ((makeCRC(s) == System.Text.Encoding.UTF8.GetString(bs, bspend - bspini - 2, 2)) || (_awaitedsize != 0 && DEF_IGNOREGRAPHCRC))
+                                            try
                                             {
-                                                waitans = false;
-                                                bValidCmd = true;
-                                                break;
+                                                string crcRecv = System.Text.Encoding.UTF8.GetString(bs, bspend - bspini - 2, 2);
+                                                string crcCalc = makeCRC(s);
+                                                TransducerLogger.LogFmt("PARSER CRC calc={0} recv={1}", crcCalc, crcRecv);
+                                                if ((crcCalc == crcRecv) || (_awaitedsize != 0 && DEF_IGNOREGRAPHCRC))
+                                                {
+                                                    waitans = false;
+                                                    bValidCmd = true;
+                                                    break;
+                                                }
+                                                else
+                                                {
+                                                    Debug.Print("wrong crc. waiting:" + makeCRC(s));
+                                                    TransducerLogger.Log("PARSER: wrong CRC, will wait for more data");
+                                                }
                                             }
-                                            else
+                                            catch (Exception ex)
                                             {
-                                                Debug.Print("wrong crc. waiting:" + makeCRC(s));
+                                                TransducerLogger.LogException(ex, "PARSER CRC check exception");
                                             }
                                         }
                                         if (!bValidCmd)
                                         {
                                             Debug.Print("waiting:" + _awaitedsize + " rx:" + (bspend - bspini + 1));
+                                            TransducerLogger.LogFmt("PARSER waiting awaited={0} rx={1}", _awaitedsize, (bspend - bspini + 1));
                                         }
                                         if (_awaitedsize == 0 || bspend - bspini + 1 == _awaitedsize)
                                             break;
                                         else
                                             itry++;
                                     }
-                                }    
+                                }
                                 Thread.Sleep(5);
                                 if (Timeouted(tickCheckGarbage, DEF_TIMESPAN_ABORTGARBAGE, "parse"))
                                 {
                                     Debug.Print("TIMEOUT PARSING");
+                                    TransducerLogger.Log("TIMEOUT PARSING");
                                     break;
                                 }
-                            } 
+                            }
 
 
                             #endregion
@@ -2089,6 +2201,7 @@ namespace Transducers
                                         signalmeasure.lmeasure.Add(DEF_MEASURE_GARBAGE);
                                         signalmeasure.lticktx.Add(System.Environment.TickCount - signalmeasure.iTickTX);
                                     }
+                                    TransducerLogger.LogFmt("RX INVALID COMMAND: bytes={0}", offset);
                                 }
                             }
                             else
@@ -2099,11 +2212,11 @@ namespace Transducers
 
 #if !DEF_IGNORE_TRANSDUCER_ERRORS
 
-                                if (bspend - bspini == 0x13 && bs[13 + bspini] == 0x45 && bs[14 + bspini] == 0x52)    
+                                if (bspend - bspini == 0x13 && bs[13 + bspini] == 0x45 && bs[14 + bspini] == 0x52)
                                 {
-                                    if (                                   
-                                        _state == eState.eWaitingAquisitionConfig &&    
-                                        Convert.ToInt32(System.Text.Encoding.UTF8.GetString(bs, 15 + bspini, 2)) == 4 &&   
+                                    if (
+                                        _state == eState.eWaitingAquisitionConfig &&
+                                        Convert.ToInt32(System.Text.Encoding.UTF8.GetString(bs, 15 + bspini, 2)) == 4 &&
                                         iConsecErrs >= 2
                                         )
                                     {
@@ -2112,51 +2225,50 @@ namespace Transducers
                                         bs = Encoding.UTF8.GetBytes(s);
 
                                         Write2Log("dummy SA");
-
-
+                                        TransducerLogger.Log("Injected dummy SA response");
                                     }
-                                    if (                           
-                                        _state == eState.eWaitingAquisitionAdditionalConfig &&    
-                                        Convert.ToInt32(System.Text.Encoding.UTF8.GetString(bs, 15 + bspini, 2)) == 3 &&  
+                                    if (
+                                        _state == eState.eWaitingAquisitionAdditionalConfig &&
+                                        Convert.ToInt32(System.Text.Encoding.UTF8.GetString(bs, 15 + bspini, 2)) == 3 &&
                                         iConsecErrs >= 2
                                         )
                                     {
-                                        string s = "000008C4D0B4SB01";    
+                                        string s = "000008C4D0B4SB01";
                                         s = "[" + s + makeCRC(s) + "]";
                                         bs = Encoding.UTF8.GetBytes(s);
 
                                         Write2Log("dummy SB");
-
+                                        TransducerLogger.Log("Injected dummy SB response");
                                     }
-                                    if (                
-                                        _state == eState.eWaitingAquisitionAdditional2Config &&    
-                                        Convert.ToInt32(System.Text.Encoding.UTF8.GetString(bs, 15 + bspini, 2)) == 3 &&  
+                                    if (
+                                        _state == eState.eWaitingAquisitionAdditional2Config &&
+                                        Convert.ToInt32(System.Text.Encoding.UTF8.GetString(bs, 15 + bspini, 2)) == 3 &&
                                         iConsecErrs >= 2
                                         )
                                     {
-                                        string s = "000008C4D0B4SC01";    
+                                        string s = "000008C4D0B4SC01";
                                         s = "[" + s + makeCRC(s) + "]";
                                         bs = Encoding.UTF8.GetBytes(s);
 
                                         Write2Log("dummy SC");
-
+                                        TransducerLogger.Log("Injected dummy SC response");
                                     }
 
                                 }
                                 if (
                                     bspend - bspini == 0x13 && bs[13 + bspini] == 0x45 &&
-                                    bs[14 + bspini] == 0x52 
+                                    bs[14 + bspini] == 0x52
                                     )
                                 {
                                     lock (signalmeasure.lmeasure)
                                     {
-                                        if (_state != eState.eWaitingAquisitionAdditionalConfig && _state != eState.eWaitingAquisitionAdditional2Config)   
+                                        if (_state != eState.eWaitingAquisitionAdditionalConfig && _state != eState.eWaitingAquisitionAdditional2Config)
                                         {
                                             signalmeasure.laststateerr = (int)_state;
                                             signalmeasure.lmeasure.Add(DEF_MEASURE_ERR);
 
                                             Write2Log("err");
-
+                                            TransducerLogger.Log("Transducer returned ERR packet");
                                         }
                                         signalmeasure.lticktx.Add(System.Environment.TickCount - signalmeasure.iTickTX);
                                     }
@@ -2172,9 +2284,10 @@ namespace Transducers
                                     }
                                     catch { }
                                     Write2Log("<-" + "rx [ERR] " + System.Environment.TickCount + " :" + s + " " + (errtran == 3 ? "INVALID COMMAND" : ""));
+                                    TransducerLogger.LogFmt("RX [ERR] {0} errtype={1}", s, errtran);
 
 
-                                    if (errtran == 3 && iConsecErrs > 1)        
+                                    if (errtran == 3 && iConsecErrs > 1)
                                     {
                                         if (_state == eState.eWaitingTorqueOffset)
                                         {
@@ -2184,7 +2297,7 @@ namespace Transducers
                                             try
                                             {
                                                 //if (RaiseEvent != null)
-                                                    //RaiseEvent(TransducerEvent.OldTransducerFirmwareDetected);
+                                                //RaiseEvent(TransducerEvent.OldTransducerFirmwareDetected);
                                             }
                                             catch { }
                                         }
@@ -2196,7 +2309,7 @@ namespace Transducers
                                             try
                                             {
                                                 //if (RaiseEvent != null)
-                                                    //RaiseEvent(TransducerEvent.OldTransducerFirmwareDetected);
+                                                //RaiseEvent(TransducerEvent.OldTransducerFirmwareDetected);
                                             }
                                             catch { }
                                         }
@@ -2208,7 +2321,7 @@ namespace Transducers
                                             try
                                             {
                                                 //if (RaiseEvent != null)
-                                                    //RaiseEvent(TransducerEvent.OldTransducerFirmwareDetected);
+                                                //RaiseEvent(TransducerEvent.OldTransducerFirmwareDetected);
                                             }
                                             catch { }
                                         }
@@ -2220,7 +2333,7 @@ namespace Transducers
                                             try
                                             {
                                                 //if (RaiseEvent != null)
-                                                    //RaiseEvent(TransducerEvent.OldTransducerFirmwareDetected);
+                                                //RaiseEvent(TransducerEvent.OldTransducerFirmwareDetected);
                                             }
                                             catch { }
                                         }
@@ -2233,14 +2346,15 @@ namespace Transducers
                                         flags = new sFlags();
 
                                         Write2Log("max rx errs " + System.Environment.TickCount);
+                                        TransducerLogger.Log("max rx errs reached - stopping service");
 
                                         Internal_StopService();
                                         try
                                         {
                                             //if (RaiseError != null)
                                             //{
-                                                //if (enableraiseerrors)
-                                                    //RaiseError(errtran);
+                                            //if (enableraiseerrors)
+                                            //RaiseError(errtran);
                                             //}
                                         }
                                         catch { }
@@ -2254,17 +2368,18 @@ namespace Transducers
                                         signalmeasure.lmeasure.Add(DEF_MEASURE_OK);
                                         signalmeasure.lticktx.Add(System.Environment.TickCount - signalmeasure.iTickTX);
                                     }
-                                    if (iConsecErrs > 22)    
+                                    if (iConsecErrs > 22)
                                         Debug.Print("esquema de iConsecErrs funciona :" + iConsecErrs);
 
                                     iConsecErrs = 0;
 
-                                    int lppini = 0; 
-                                    if (_state != eState.eWaitingChartBlock || bPrintCommToFile)       
+                                    int lppini = 0;
+                                    if (_state != eState.eWaitingChartBlock || bPrintCommToFile)
                                     {
                                         LastPackage = System.Text.Encoding.UTF8.GetString(bs, bspini, bspend - bspini + 1);
 
                                         Write2Log("<-" + "rx " + System.Environment.TickCount + " :" + LastPackage);
+                                        TransducerLogger.LogFmt("RX package stored LastPackage len={0}", LastPackage?.Length ?? 0);
                                     }
 
                                     lock (locker_State)
@@ -2283,6 +2398,7 @@ namespace Transducers
                                                 ValidCommand = true;
                                                 _id = LastPackage.Substring(1 + lppini, 12);
                                                 flags.MustSendGetID = false;
+                                                TransducerLogger.LogFmt("Parsed ID -> _id={0}", _id);
                                             }
                                         }
                                         #endregion
@@ -2298,6 +2414,7 @@ namespace Transducers
                                                 {
                                                     flags.MustConfigure = false;
                                                     flags.Configuration = "";
+                                                    TransducerLogger.Log("CONFIGURE ack received - flags.MustConfigure cleared");
                                                 }
                                             }
                                         }
@@ -2332,7 +2449,7 @@ namespace Transducers
                                                     try
                                                     {
                                                         //if (enableraiseerrors && RaiseError != null)
-                                                            //RaiseError(104);
+                                                        //RaiseError(104);
                                                     }
                                                     catch { }
                                                 }
@@ -2341,12 +2458,12 @@ namespace Transducers
                                                 try
                                                 {
                                                     //if (DebugInformation != null)
-                                                        //DebugInformation(debug);
+                                                    //DebugInformation(debug);
                                                 }
                                                 catch { }
 
                                                 flags.tickDeviceStatus = System.Environment.TickCount;
-
+                                                TransducerLogger.LogFmt("DeviceStatus parsed: State={0} Error={1} Temp_mC={2}", debug.State, debug.Error, debug.Temp_mC);
                                             }
                                         }
                                         #endregion
@@ -2384,14 +2501,16 @@ namespace Transducers
                                                         number = Convert.ToInt32(LastPackage.Substring(43 + lppini, 8), 16);
                                                         _aquisitionstatus.AngleResult = ConvertAngleFromBus(number);
 
+                                                        TransducerLogger.LogFmt("Acquisition finished: TorqueResult={0} AngleResult={1} samples={2}", _aquisitionstatus.TorqueResult, _aquisitionstatus.AngleResult, _aquisitionstatus.size);
+
                                                         int maxblocksize = DEF_MAX_BLOCKSIZE;
                                                         int maxsamples = DEF_MAX_GRAPHSIZE;
 
                                                         int lastsample;
                                                         if (_aquisitionstatus.indextht > _aquisitionstatus.peakindex && _aquisitionstatus.indextht < _aquisitionstatus.size)
-                                                            lastsample = _aquisitionstatus.indextht;     
+                                                            lastsample = _aquisitionstatus.indextht;
                                                         else
-                                                            lastsample = _aquisitionstatus.size;                    
+                                                            lastsample = _aquisitionstatus.size;
 
                                                         Debug.Print("maxsamples (to ask):" + maxsamples);
                                                         Debug.Print("peakindex: " + _aquisitionstatus.peakindex);
@@ -2405,12 +2524,12 @@ namespace Transducers
                                                         int step = ((lastsample - 1) / maxsamples) + 1;
                                                         Debug.Print("step: " + step);
 
-                                                        int nsamples = lastsample / step;      
+                                                        int nsamples = lastsample / step;
                                                         Debug.Print("samples to ask: " + nsamples);
 
-                                                        int firstsample = lastsample - (nsamples * step);    
+                                                        int firstsample = lastsample - (nsamples * step);
                                                         Debug.Print("firstsample: " + firstsample);
-                                                        int rest = _aquisitionstatus.peakindex % step;     
+                                                        int rest = _aquisitionstatus.peakindex % step;
 
                                                         if (rest > 0)
                                                         {
@@ -2451,9 +2570,9 @@ namespace Transducers
                                                         }
                                                         catch { }
 
-                                                    }  
+                                                    }
                                                 }
-                                                catch { }
+                                                catch (Exception ex) { TransducerLogger.LogException(ex, "Parsing LS block exception"); }
 
 
                                             }
@@ -2476,12 +2595,16 @@ namespace Transducers
 
 
 
-
                                                 int number = Convert.ToInt32(LastPackage.Substring(23 + lppini, 8), 16);
                                                 Result.Angle = ConvertAngleFromBus(number);
 
                                                 number = Convert.ToInt32(LastPackage.Substring(15 + lppini, 8), 16);
                                                 Result.Torque = AD2Nm(number);
+
+                                                // LOG: parsed TQ raw and converted values
+                                                TransducerLogger.LogFmt("PARSED TQ raw: torqueHex={0} torqueAd={1} torqueNm={2} | angleHex={3} angleAd={4} angleDeg={5}",
+                                                    LastPackage.Substring(15 + lppini, 8), number, Result.Torque,
+                                                    LastPackage.Substring(23 + lppini, 8), Convert.ToInt32(LastPackage.Substring(23 + lppini, 8), 16), Result.Angle);
 
                                                 if (bSim_Angle)
                                                 {
@@ -2495,10 +2618,14 @@ namespace Transducers
                                                     if (DataResult != null)
                                                     {
                                                         Debug.Print("Informing " + Result.Torque + " " + System.Environment.TickCount);
+                                                        TransducerLogger.LogFmt("Publishing DataResult: Torque={0} Angle={1}", Result.Torque, Result.Angle);
                                                         DataResult(Result);
                                                     }
                                                 }
-                                                catch { }
+                                                catch (Exception ex)
+                                                {
+                                                    TransducerLogger.LogException(ex, "DataResult event handler threw");
+                                                }
 
                                                 SetState(eState.eWaitBetweenReads);
                                             }
@@ -2514,6 +2641,7 @@ namespace Transducers
                                             {
                                                 ValidCommand = true;
                                                 flags.MustSendAquisitionConfig = false;
+                                                TransducerLogger.Log("SA ack received - MustSendAquisitionConfig cleared");
                                             }
                                         }
                                         else if (_state == eState.eWaitingAquisitionClickWrenchConfig)
@@ -2524,6 +2652,7 @@ namespace Transducers
                                             {
                                                 ValidCommand = true;
                                                 flags.MustSendAquisitionClickWrenchConfig = false;
+                                                TransducerLogger.Log("CS ack received - MustSendAquisitionClickWrenchConfig cleared");
                                             }
                                         }
                                         else if (_state == eState.eWaitingAquisitionAdditionalConfig)
@@ -2534,6 +2663,7 @@ namespace Transducers
                                             {
                                                 ValidCommand = true;
                                                 flags.MustSendAquisitionAdditionalConfig = false;
+                                                TransducerLogger.Log("SB ack received - MustSendAquisitionAdditionalConfig cleared");
                                             }
                                         }
                                         else if (_state == eState.eWaitingAquisitionAdditional2Config)
@@ -2544,6 +2674,7 @@ namespace Transducers
                                             {
                                                 ValidCommand = true;
                                                 flags.MustSendAquisitionAdditional2Config = false;
+                                                TransducerLogger.Log("SC ack received - MustSendAquisitionAdditional2Config cleared");
                                             }
                                         }
                                         #endregion
@@ -2600,11 +2731,11 @@ namespace Transducers
                                                 {
                                                     //if (enableraiseerrors && RaiseError != null)
                                                     //{
-                                                        //if (TorqueConversionFactor == 0)
-                                                           // RaiseError(102);
+                                                    //if (TorqueConversionFactor == 0)
+                                                    // RaiseError(102);
 
-                                                        //if (AngleConversionFactor == 0)
-                                                            //RaiseError(103);
+                                                    //if (AngleConversionFactor == 0)
+                                                    //RaiseError(103);
                                                     //}
                                                 }
                                                 catch { }
@@ -2617,21 +2748,22 @@ namespace Transducers
 
                                                 Debug.Print("INFO - sn:" + sn + " model:" + model + " hw:" + hw + " fw:" + fw + " type:" + type + " cap:" + cap + " TorqueConversionFactor:" + TorqueConversionFactor + " AngleConversionFactor:" + AngleConversionFactor);
 
+                                                TransducerLogger.LogFmt("DI parsed - sn:{0} model:{1} hw:{2} fw:{3} type:{4} cap:{5}", sn, model, hw, fw, type, cap);
 
                                                 string[] Colunas = new string[]
                                                                 {
                                                                     "$ID",
-                                                                    sn,   
-                                                                    cap,   
-                                                                    "0",  
-                                                                    "0",     
-                                                                    "0",  
+                                                                    sn,
+                                                                    cap,
+                                                                    "0",
+                                                                    "0",
+                                                                    "0",
                                                                     outtype,
-                                                                    "0", 
-                                                                    "0", 
-                                                                    "1", 
-                                                                    "0",     
-                                                                    "0", 
+                                                                    "0",
+                                                                    "0",
+                                                                    "1",
+                                                                    "0",
+                                                                    "0",
                                                                     TorqueConversionFactor.ToString(),
                                                                     AngleConversionFactor.ToString(),
                                                                     model,
@@ -2649,6 +2781,7 @@ namespace Transducers
                                                         {
                                                             Write2Log("datainfo hardid:" + di.HardID + " " + System.Environment.TickCount);
                                                             DataInformation(di);
+                                                            TransducerLogger.Log("DataInformation event fired");
                                                         }
                                                     }
                                                     catch { Debug.Assert(false); }
@@ -2668,6 +2801,7 @@ namespace Transducers
                                                 ValidCommand = true;
 
                                                 flags.MustSendZeroTorque = false;
+                                                TransducerLogger.Log("ZO ack received - MustSendZeroTorque cleared");
                                             }
                                         }
                                         else if (_state == eState.eWaitingZeroAngle)
@@ -2679,6 +2813,7 @@ namespace Transducers
                                                 ValidCommand = true;
 
                                                 flags.MustSendZeroAngle = false;
+                                                TransducerLogger.Log("ZO ack received - MustSendZeroAngle cleared");
                                             }
                                         }
                                         else if (_state == eState.eWaitingTorqueOffset)
@@ -2690,6 +2825,7 @@ namespace Transducers
                                                 ValidCommand = true;
 
                                                 flags.MustSendTorqueOffset = false;
+                                                TransducerLogger.Log("SO ack received - MustSendTorqueOffset cleared");
                                             }
                                         }
 
@@ -2705,15 +2841,7 @@ namespace Transducers
                                                 ValidCommand = true;
 
                                                 flags.MustCalibrate = false;
-                                                //if (RaiseEvent != null)
-                                                //{
-                                                    //try
-                                                    //{
-                                                       // flags.MustSendRequestInformation = true;    
-                                                        //RaiseEvent(TransducerEvent.CalibrationOK);
-                                                    //}
-                                                    //catch { }
-                                                //}
+                                                TransducerLogger.Log("CW ack received - calibration flags cleared");
                                             }
                                         }
                                         #endregion
@@ -2759,7 +2887,7 @@ namespace Transducers
                                                                     Overshuts.ToString(),
                                                                     HigherOvershut.ToString(),
                                                                     AdditionalCounter1.ToString(),
-                                                                    AdditionalCounter2.ToString() 
+                                                                    AdditionalCounter2.ToString()
                                                                 };
 
                                                 di.SetInformationByColunms(Colunas);
@@ -2768,7 +2896,8 @@ namespace Transducers
                                                     try
                                                     {
                                                         //if (CountersInformation != null)
-                                                            //CountersInformation(di);
+                                                        //CountersInformation(di);
+                                                        TransducerLogger.Log("Counters parsed and set (not fired)");
                                                     }
                                                     catch { Debug.Assert(false); }
                                                 }
@@ -2797,7 +2926,7 @@ namespace Transducers
                                                     ValidCommand = true;
 
                                                     Debug.Print("******** NEW PACKET " + System.Environment.TickCount);
-
+                                                    TransducerLogger.Log("CHART_BLOCK GD received - processing");
 
                                                     ticks.tick_initproc = System.Environment.TickCount;
                                                     Debug.Print("meas.\tiniproc-RX:\t" + (ticks.tick_initproc - ticks.tick_datareceived));
@@ -2827,8 +2956,8 @@ namespace Transducers
                                                             iaux |= 255 << 24;
                                                         }
 
-                                                        if (_aquisitionstatus.TorqueResult < 0)                 
-                                                            iaux *= -1;   
+                                                        if (_aquisitionstatus.TorqueResult < 0)
+                                                            iaux *= -1;
 
                                                         byte[] b2 = new byte[2];
                                                         b2[0] = bs[i + 3];
@@ -2836,7 +2965,7 @@ namespace Transducers
 
                                                         bcomplete = false;
                                                         if ((b2[0] & 128) == 128)
-                                                            bcomplete = true; 
+                                                            bcomplete = true;
 
                                                         int iaux2 = (b2[0] << 8) + b2[1];
 
@@ -2885,10 +3014,10 @@ namespace Transducers
 
 
                                                         Result.Type = "FR";
-                                                        Result.ThresholdDir = (int)_aquisitionstatus.dir;   
-                                                        Result.ResultDir = (Result.Torque > 0 ? 0 : 1);   
+                                                        Result.ThresholdDir = (int)_aquisitionstatus.dir;
+                                                        Result.ResultDir = (Result.Torque > 0 ? 0 : 1);
 
-                                                        Result.Torque = Math.Abs(Result.Torque);   
+                                                        Result.Torque = Math.Abs(Result.Torque);
 
                                                         if (bSim_Angle)
                                                         {
@@ -2902,6 +3031,7 @@ namespace Transducers
                                                         {
                                                             try
                                                             {
+                                                                TransducerLogger.LogFmt("Publishing TesteResult: samples_count={0} higherTQ={1} ixHigher={2}", TesteResultsList?.Count ?? 0, higherTQ, ixHigherTQ);
                                                                 TesteResult(TesteResultsList);
                                                             }
                                                             finally { }
@@ -2926,9 +3056,9 @@ namespace Transducers
                                                     }
                                                 }
 
-                                            } 
+                                            }
 
-                                        }  
+                                        }
 
                                         #endregion
 
@@ -2938,13 +3068,13 @@ namespace Transducers
                                             iConsecErrsUnknown = 0;
                                         }
 
-                                    } 
+                                    }
 
-                                }    
+                                }
 
-                            }   
+                            }
 
-                        } 
+                        }
 
                         catch (Exception err)
                         {
@@ -2953,19 +3083,48 @@ namespace Transducers
                             Debug.Print(err.Message);
                             iConsecErrsUnknown++;
 
-
+                            TransducerLogger.LogException(err, "serialPort_DataReceived catch (unknown)");
                             Write2Log("data catch (unknown) " + err.Message + " " + (err.InnerException != null ? err.InnerException.Message : "") + " " + System.Environment.TickCount, true);
 
                         }
-                    } 
-                } 
+                    }
+                }
             }
-            catch (Exception ex) { Write2Log("RX err " + ex.Message, true); }
+            catch (Exception ex)
+            {
+                TransducerLogger.LogException(ex, "serialPort_DataReceived outer catch");
+                Write2Log("RX err " + ex.Message, true);
+            }
             finally
             {
                 Write2Log("RX out", true);
+                TransducerLogger.Log("serialPort_DataReceived: exit");
             }
-        }
+        
+        
+        
+        
+        
+        }//aqui
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         public string PortName
         {
@@ -2991,10 +3150,11 @@ namespace Transducers
         }
 
         private object objcon = new object();
-        private bool enableraiseerrors = false;               
+        private bool enableraiseerrors = false;
         public void StartService()
         {
             Debug.Print("----- PHOENIX START SERVICE -------");
+            TransducerLogger.Log("StartService called");
             bUserStartService = true;
             lock (signalmeasure.lmeasure)
             {
@@ -3022,9 +3182,10 @@ namespace Transducers
             bClosing = true;
             try
             {
-                if(sp!=null)
+                if (sp != null)
                 {
                     Write2Log("ClosePort", true);
+                    TransducerLogger.Log("ClosePort called");
                     {
 
                         Debug.Print("%%%%%%%%%%%%% SP.RTS %%%%%%%%%%%%%%%%%%");
@@ -3035,7 +3196,7 @@ namespace Transducers
 
                         try { sp.DataReceived -= HandlerDataReceiver; }
                         catch { }
-                        Thread.Sleep(500);    
+                        Thread.Sleep(500);
 
                         try { if (sp.IsOpen) sp.DiscardInBuffer(); }
                         catch { }
@@ -3044,21 +3205,24 @@ namespace Transducers
 
                         Debug.Print("%%%%%%%%%%%%% SP.CLOSE %%%%%%%%%%%%%%%%%%");
 
-                        Write2Log("close",true);          
+                        Write2Log("close", true);
 
                         sp.Close();
 
-                        Write2Log("closed",true);          
+                        Write2Log("closed", true);
 
                         Debug.Print("%%%%%%%%%%%%% SP.CLOSED %%%%%%%%%%%%%%%%%%");
                         Thread.Sleep(300);
 
                         bPortOpen = false;
+                        TransducerLogger.Log("ClosePort: port closed");
                     }
                 }
             }
-            catch(Exception ex) { 
-                Debug.Print("ERR:" + ex.Message + " - " + (ex.InnerException!=null?ex.InnerException.Message:""));
+            catch (Exception ex)
+            {
+                Debug.Print("ERR:" + ex.Message + " - " + (ex.InnerException != null ? ex.InnerException.Message : ""));
+                TransducerLogger.LogException(ex, "ClosePort exception");
                 try
                 {
 
@@ -3072,7 +3236,7 @@ namespace Transducers
                         }
                     }
                 }
-                catch { }            
+                catch { }
             }
             bClosing = false;
         }
@@ -3093,7 +3257,7 @@ namespace Transducers
             {
                 bool bcon = false;
                 bool braise = false;
-                Exception expaux=null;
+                Exception expaux = null;
                 try
                 {
                     Debug.Print("%%%%%%%%%%%%% StartService %%%%%%%%%%%%%%%%%% " + System.Environment.TickCount);
@@ -3110,7 +3274,7 @@ namespace Transducers
                     }
                     catch { }
 
-                    sck = new TcpClient();          
+                    sck = new TcpClient();
 
                     sck.ReceiveBufferSize = 2048;
                     sck.ReceiveTimeout = 2000;
@@ -3122,6 +3286,7 @@ namespace Transducers
                     sck.Connect(_Eth_IP, _Eth_Port);
                     Debug.Print("%%%%%%%%%%%%% StartService connected %%%%%%%%%%%%%%%%%% " + System.Environment.TickCount);
 
+                    TransducerLogger.LogFmt("ETH CONNECTED: {0}:{1}", _Eth_IP, _Eth_Port);
 
                     Debug.Print("%%%%%%%%%%%%% StartService GetStream %%%%%%%%%%%%%%%%%% " + System.Environment.TickCount);
 
@@ -3139,15 +3304,16 @@ namespace Transducers
                             {
                                 string message = System.Text.Encoding.ASCII.GetString(data, 0, bytes);
                                 Debug.Print("------ DISCARDED: " + bytes + " " + message);
+                                TransducerLogger.LogFmt("StartService_Eth: discarded initial bytes={0} msg='{1}'", bytes, message);
                             }
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { TransducerLogger.LogException(ex, "StartService_Eth discard read"); }
 
                     bcon = true;
 
                 }
-                catch (Exception err) { braise = true; expaux = err; }
+                catch (Exception err) { braise = true; expaux = err; TransducerLogger.LogException(err, "Internal_StartService_Eth exception"); }
                 finally
                 {
                     _IsConnected = bcon;
@@ -3161,8 +3327,8 @@ namespace Transducers
                     {
                         //if (RaiseError != null)
                         //{
-                            //if (enableraiseerrors)
-                                //RaiseError(101);
+                        //if (enableraiseerrors)
+                        //RaiseError(101);
                         //}
                     }
                     catch { }
@@ -3181,72 +3347,74 @@ namespace Transducers
                 bool braise = false;
                 try
                 {
-                    
+
                     if (_PortName == string.Empty)
                         return;
 
-                        Debug.Print("%%%%%%%%%%%%% CLOSE PORT %%%%%%%%%%%%%%%%%%");
-                        Thread t = new Thread(() => ClosePort(SerialPort));
-                        t.Start();
+                    Debug.Print("%%%%%%%%%%%%% CLOSE PORT %%%%%%%%%%%%%%%%%%");
+                    Thread t = new Thread(() => ClosePort(SerialPort));
+                    t.Start();
 
-                        t.Join(5000);
+                    t.Join(5000);
 
-                        int i = 0;
-                        var portExists = SerialPort.GetPortNames().Any(x => x == this._PortName);
-                        if (portExists && !SerialPort.IsOpen)
+                    int i = 0;
+                    var portExists = SerialPort.GetPortNames().Any(x => x == this._PortName);
+                    if (portExists && !SerialPort.IsOpen)
+                    {
+                        while (true)
                         {
-                            while (true)
+                            try
                             {
-                                try
+
+                                SerialPort.PortName = this._PortName;
+                                SerialPort.BaudRate = BAUDRATE_USB;
+                                Debug.Print("%%%%%%%%%%%%% OPEN PORT %%%%%%%%%%%%%%%%%% " + this._PortName + " baudrate:" + SerialPort.BaudRate + " " + System.Environment.TickCount);
+                                SerialPort.DataReceived -= HandlerDataReceiver;
+                                SerialPort.DataReceived += HandlerDataReceiver;
+
+                                Write2Log("Open " + SerialPort.PortName + " " + SerialPort.BaudRate + " " + System.Environment.TickCount);
+
+                                SerialPort.RtsEnable = true;
+                                SerialPort.ReadTimeout = SerialPort.WriteTimeout = 9000;
+
+                                Write2Log("IntStart open", true);
+                                SerialPort.Open();
+                                Write2Log("open", true);
+
+                                Debug.Print("%%%%%%%%%%%%% PORT OPENED %%%%%%%%%%%%%%%%%% " + System.Environment.TickCount);
+                                TransducerLogger.LogFmt("SERIAL OPEN: {0} baud:{1}", SerialPort.PortName, SerialPort.BaudRate);
+                                bcon = true;
+                                if (i > 0)
+                                    Debug.Print("loop works");
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                TransducerLogger.LogException(ex, "Internal_StartService_Serial open attempt failed");
+                                if (System.Environment.TickCount - tini < 7000)
                                 {
-
-                                    SerialPort.PortName = this._PortName;
-                                    SerialPort.BaudRate = BAUDRATE_USB;     
-                                    Debug.Print("%%%%%%%%%%%%% OPEN PORT %%%%%%%%%%%%%%%%%% " + this._PortName + " baudrate:" + SerialPort.BaudRate + " " + System.Environment.TickCount);
-                                    SerialPort.DataReceived -= HandlerDataReceiver;
-                                    SerialPort.DataReceived += HandlerDataReceiver;
-
-                                    Write2Log("Open " + SerialPort.PortName + " " + SerialPort.BaudRate + " " + System.Environment.TickCount);
-
-                                    SerialPort.RtsEnable = true;
-                                    SerialPort.ReadTimeout = SerialPort.WriteTimeout = 9000;  
-
-                                    Write2Log("IntStart open",true);
-                                    SerialPort.Open();
-                                    Write2Log("open",true); 
-
-                                    Debug.Print("%%%%%%%%%%%%% PORT OPENED %%%%%%%%%%%%%%%%%% " + System.Environment.TickCount);
-                                    bcon = true;
-                                    if (i > 0)
-                                        Debug.Print("loop works");
-                                    break;
-                                }
-                                catch
-                                {
-                                    if (System.Environment.TickCount - tini < 7000)       
+                                    Thread.Sleep(700);
+                                    if (i >= 3)
                                     {
-                                        Thread.Sleep(700);
-                                        if (i >= 3)
-                                        {
-                                            braise = true;
-                                            break;
-                                        }
-                                    }
-                                    else
-                                    {
+                                        braise = true;
                                         break;
                                     }
                                 }
-                                i++;
+                                else
+                                {
+                                    break;
+                                }
                             }
+                            i++;
                         }
+                    }
                 }
-                catch (Exception err) { braise = true; expaux = err; }        
+                catch (Exception err) { braise = true; expaux = err; TransducerLogger.LogException(err, "Internal_StartService_Serial exception"); }
                 finally
                 {
                     _IsConnected = bcon;
                 }
-                if(braise)
+                if (braise)
                 {
                     Write2Log("starteth ser:" + SerialPort.PortName + " err:" + (expaux != null ? expaux.Message + (expaux.InnerException != null ? expaux.InnerException.Message : "") : "") + System.Environment.TickCount);
 
@@ -3255,8 +3423,8 @@ namespace Transducers
                     {
                         //if (RaiseError != null)
                         //{
-                            //if (enableraiseerrors)
-                                //RaiseError(101);
+                        //if (enableraiseerrors)
+                        //RaiseError(101);
                         //}
                     }
                     catch { }
@@ -3279,7 +3447,7 @@ namespace Transducers
                 SerialPort.PortName = this._PortName;
                 if (SerialPort.BaudRate == BAUDRATE_USB)
                 {
-                    SerialPort.BaudRate = BAUDRATE_BLUETOOTH;     
+                    SerialPort.BaudRate = BAUDRATE_BLUETOOTH;
                 }
                 else
                 {
@@ -3294,17 +3462,19 @@ namespace Transducers
 
                 SerialPort.RtsEnable = true;
 
-                Write2Log("changebaud open",true); 
+                Write2Log("changebaud open", true);
                 SerialPort.Open();
-                Write2Log("open",true); 
+                Write2Log("open", true);
+                TransducerLogger.LogFmt("ChangeBaudRate: set baud {0} on port {1}", SerialPort.BaudRate, SerialPort.PortName);
 
             }
-            catch { }
+            catch (Exception ex) { TransducerLogger.LogException(ex, "ChangeBaudRate exception"); }
         }
         private void ClearNeeds()
         {
             flags = new sFlags();
             Write2Log("clear needs");
+            TransducerLogger.Log("ClearNeeds called - flags cleared");
 
 
         }
@@ -3315,7 +3485,7 @@ namespace Transducers
             bUserStartService = false;
 
             Write2Log("stop service " + System.Environment.TickCount);
-
+            TransducerLogger.Log("StopService called");
 
             enableraiseerrors = false;
 
@@ -3327,33 +3497,36 @@ namespace Transducers
             {
                 Debug.Print("%%%%%%%%%%%%% StopService %%%%%%%%%%%%%%%%%%");
                 Write2Log("internal stop service " + System.Environment.TickCount);
+                TransducerLogger.Log("Internal_StopService called");
 
                 try
                 {
-                        Thread.Sleep(200);
-                        ClearNeeds();
-                        this.StopReadData();
-                        Debug.Print("%%%%%%%%%%%%% CLOSE PORT %%%%%%%%%%%%%%%%%%");
-                        if (_Eth_IP == string.Empty || _Eth_IP == null)
-                        {
-                            Thread t = new Thread(() => ClosePort(SerialPort));
-                            t.Start();
-                            t.Join(2000);
-                        }
-                        else
-                        {
-                            sck.Close();
-                            bPortOpen = false;
-                        }
-                        Debug.Print("%%%%%%%%%%%%% PORT CLOSED %%%%%%%%%%%%%%%%%%");
+                    Thread.Sleep(200);
+                    ClearNeeds();
+                    this.StopReadData();
+                    Debug.Print("%%%%%%%%%%%%% CLOSE PORT %%%%%%%%%%%%%%%%%%");
+                    if (_Eth_IP == string.Empty || _Eth_IP == null)
+                    {
+                        Thread t = new Thread(() => ClosePort(SerialPort));
+                        t.Start();
+                        t.Join(2000);
+                    }
+                    else
+                    {
+                        sck.Close();
+                        bPortOpen = false;
+                    }
+                    Debug.Print("%%%%%%%%%%%%% PORT CLOSED %%%%%%%%%%%%%%%%%%");
 
-                        _IsConnected = false;
+                    _IsConnected = false;
                 }
                 catch (Exception err)
                 {
+                    TransducerLogger.LogException(err, "Internal_StopService exception");
                     throw err;
                 }
                 Write2Log("stopped " + System.Environment.TickCount);
+                TransducerLogger.Log("Internal_StopService completed");
 
             }
         }
@@ -3371,8 +3544,9 @@ namespace Transducers
                 bPortOpen = false;
                 shutdown = true;
                 DisposeTimer();
+                TransducerLogger.Log("Dispose called - cleaned up resources");
             }
-            catch { }
+            catch (Exception ex) { TransducerLogger.LogException(ex, "Dispose exception"); }
         }
         public void StartCalibration()
         {
@@ -3380,10 +3554,12 @@ namespace Transducers
             {
 
                 flags.MustSendReadData = true;
+                TransducerLogger.Log("StartCalibration called - MustSendReadData set true");
             }
             catch (Exception err)
             {
 
+                TransducerLogger.LogException(err, "StartCalibration exception");
                 throw err;
             }
 
@@ -3392,12 +3568,14 @@ namespace Transducers
         {
             try
             {
-                    flags.MustSendReadData = true;
-                    flags.CaptureNewTightening = true;
+                flags.MustSendReadData = true;
+                flags.CaptureNewTightening = true;
+                TransducerLogger.Log("StartReadData called - MustSendReadData & CaptureNewTightening true");
             }
             catch (Exception err)
             {
 
+                TransducerLogger.LogException(err, "StartReadData exception");
                 throw err;
             }
 
@@ -3406,18 +3584,21 @@ namespace Transducers
         {
             try
             {
-                
-                    flags.MustSendReadData = false;
-                    flags.MustSendAquisitionConfig = false;
-                    flags.MustSendGetChartBlock = false;
-                    flags.CaptureNewTightening = false;
 
-                    flags.MustSendAquisitionClickWrenchConfig = false;
-                    flags.MustSendAquisitionAdditionalConfig = false;
-                    flags.MustSendAquisitionAdditional2Config = false;
+                flags.MustSendReadData = false;
+                flags.MustSendAquisitionConfig = false;
+                flags.MustSendGetChartBlock = false;
+                flags.CaptureNewTightening = false;
+
+                flags.MustSendAquisitionClickWrenchConfig = false;
+                flags.MustSendAquisitionAdditionalConfig = false;
+                flags.MustSendAquisitionAdditional2Config = false;
+
+                TransducerLogger.Log("StopReadData called - acquisition flags cleared");
             }
             catch (Exception err)
             {
+                TransducerLogger.LogException(err, "StopReadData exception");
                 throw err;
             }
 
@@ -3426,11 +3607,13 @@ namespace Transducers
         {
             try
             {
-                    flags.MustSendZeroTorque = true;
-                    System.Threading.Thread.Sleep(10);
+                flags.MustSendZeroTorque = true;
+                System.Threading.Thread.Sleep(10);
+                TransducerLogger.Log("SetZeroTorque called - MustSendZeroTorque true");
             }
             catch (Exception err)
             {
+                TransducerLogger.LogException(err, "SetZeroTorque exception");
                 throw err;
             }
         }
@@ -3438,11 +3621,13 @@ namespace Transducers
         {
             try
             {
-                    flags.MustSendZeroAngle = true;
-                    System.Threading.Thread.Sleep(10);
+                flags.MustSendZeroAngle = true;
+                System.Threading.Thread.Sleep(10);
+                TransducerLogger.Log("SetZeroAngle called - MustSendZeroAngle true");
             }
             catch (Exception err)
             {
+                TransducerLogger.LogException(err, "SetZeroAngle exception");
                 throw err;
             }
         }
@@ -3453,20 +3638,24 @@ namespace Transducers
                 flags.MustSendTorqueOffset = true;
                 flags.TorqueOffset = torqueoffset;
                 System.Threading.Thread.Sleep(10);
+                TransducerLogger.LogFmt("SetTorqueOffset called - torqueoffset={0}", torqueoffset);
             }
             catch (Exception err)
             {
+                TransducerLogger.LogException(err, "SetTorqueOffset exception");
                 throw err;
             }
         }
         public void SetTestParameter(DataInformation Info, TesteType Type, ToolType toolType, decimal NominalTorque, decimal Threshold)
         {
-            SetTestParameter(Info, Type, toolType, NominalTorque, Threshold, Threshold/2,10,1,500,eDirection.CW);
+            SetTestParameter(Info, Type, toolType, NominalTorque, Threshold, Threshold / 2, 10, 1, 500, eDirection.CW);
+            TransducerLogger.Log("SetTestParameter overload called (short)");
         }
         public void SetTestParameter(DataInformation Info, TesteType Type, ToolType toolType, decimal NominalTorque, decimal Threshold, decimal ThresholdEnd, int TimeoutEnd_ms, int TimeStep_ms, int FilterFrequency, eDirection direction)
         {
-            SetTestParameter(Info, Type, toolType, NominalTorque, Threshold, ThresholdEnd, TimeoutEnd_ms, TimeStep_ms, FilterFrequency, direction,0,0,0,0,0,0,0,0);
-        }        
+            SetTestParameter(Info, Type, toolType, NominalTorque, Threshold, ThresholdEnd, TimeoutEnd_ms, TimeStep_ms, FilterFrequency, direction, 0, 0, 0, 0, 0, 0, 0, 0);
+            TransducerLogger.Log("SetTestParameter overload called (mid)");
+        }
         public void SetTestParameter(DataInformation Info, TesteType Type, ToolType toolType, decimal NominalTorque, decimal Threshold, decimal ThresholdEnd, int TimeoutEnd_ms, int TimeStep_ms, int FilterFrequency, eDirection direction, decimal TorqueTarget, decimal TorqueMin, decimal TorqueMax, decimal AngleTarget, decimal AngleMin, decimal AngleMax, int DelayToDetectFirstPeak_ms, int TimeToIgnoreNewPeak_AfterFinalThreshold_ms)
         {
             KA();
@@ -3481,7 +3670,7 @@ namespace Transducers
             AquisitionConfig.TimeStep_ms = TimeStep_ms;
             AquisitionConfig.FilterFrequency = FilterFrequency;
             AquisitionConfig.Dir = direction;
-            
+
             AquisitionConfig.TorqueTarget = TorqueTarget;
             AquisitionConfig.TorqueMin = TorqueMin;
             AquisitionConfig.TorqueMax = TorqueMax;
@@ -3490,6 +3679,8 @@ namespace Transducers
             AquisitionConfig.AngleMax = AngleMax;
             AquisitionConfig.DelayToDetectFirstPeak_ms = DelayToDetectFirstPeak_ms;
             AquisitionConfig.TimeToIgnoreNewPeak_AfterFinalThreshold_ms = TimeToIgnoreNewPeak_AfterFinalThreshold_ms;
+
+            TransducerLogger.LogFmt("SetTestParameter called: Threshold={0} ThresholdEnd={1} TimeStep_ms={2} FilterFreq={3}", Threshold, ThresholdEnd, TimeStep_ms, FilterFrequency);
         }
 
         public void SetTestParameter_ClickWrench(ushort FallPercentage, ushort RisePercentage, ushort MinTimeBetweenPulses_ms)
@@ -3499,11 +3690,13 @@ namespace Transducers
             AquisitionClickWrenchConfig.FallPercentage = FallPercentage;
             AquisitionClickWrenchConfig.RisePercentage = RisePercentage;
             AquisitionClickWrenchConfig.MinTimeBetweenPulses_ms = MinTimeBetweenPulses_ms;
+
+            TransducerLogger.LogFmt("SetTestParameter_ClickWrench called: Fall={0} Rise={1} MinTime_ms={2}", FallPercentage, RisePercentage, MinTimeBetweenPulses_ms);
         }
 
 
         public void Calibrate(decimal AppliedTorque, decimal CurrentTorque, decimal AppliedAngle, decimal CurrentAngle)
-        { 
+        {
             try
             {
                 flags.MustCalibrate = true;
@@ -3511,11 +3704,13 @@ namespace Transducers
                 flags.Calibrate_CurrentTorque = CurrentTorque;
                 flags.Calibrate_AppliedAngle = AppliedAngle;
                 flags.Calibrate_CurrentAngle = CurrentAngle;
+                TransducerLogger.LogFmt("Calibrate called: AppliedTorque={0} CurrentTorque={1} AppliedAngle={2} CurrentAngle={3}", AppliedTorque, CurrentTorque, AppliedAngle, CurrentAngle);
             }
             catch (Exception err)
             {
+                TransducerLogger.LogException(err, "Calibrate exception");
                 throw err;
-            }       
+            }
         }
 
         public void StartCommunication()
@@ -3533,11 +3728,14 @@ namespace Transducers
                     catch { }
                 }
 
-                    flags.MustSendGetID = true;
-                    flags.MustSendGetCounters = true;
+                flags.MustSendGetID = true;
+                flags.MustSendGetCounters = true;
+
+                TransducerLogger.Log("StartCommunication called - MustSendGetID & MustSendGetCounters true");
             }
             catch (Exception err)
             {
+                TransducerLogger.LogException(err, "StartCommunication exception");
                 throw err;
             }
         }
