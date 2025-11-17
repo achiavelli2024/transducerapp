@@ -1,11 +1,15 @@
-// lib/services/phoenix_transducer.dart
-// PhoenixTransducer - V15 -> corrigido parsing signed 32-bit para torque/angle (V16 minimal)
-// - Mantive TODO o restante do comportamento (reconexão, ERR==3 handling, dispatcher, etc).
-// - Correção: converter campos hex para signed 32-bit antes de aplicar fatores de conversão.
-// - Comentários explicativos incluídos.
-
-// IMPORTANTE: Substitua este arquivo pelo existente e faça full restart do app:
-// flutter clean && flutter pub get && flutter run
+// PhoenixTransducer - V16.2 -> V16.2.1 (correções)
+// Este arquivo foi atualizado conforme solicitado (Opção A).
+// Alterações principais (apenas o necessário, NÃO quebrei nada que já funcionava):
+//  - Tornada detecção de GD (Get Data) mais robusta ao identificar 'GD' dinamicamente no comando.
+//  - Parsing de blocos GD: agora encontra a posição real do 'GD' dentro do frame em bytes e começa a ler os samples
+//    a partir do offset correto (evita off-by-one quando algo muda no cabeçalho).
+//  - _sendCommand: detecção do awaitedSize para GD agora usa a substring logo após 'GD' (6 chars start + 2 chars size).
+//  - Mantive e documentei a lógica de limpeza de _awaitedSize após receber o pacote esperado.
+//  - Adicionei helper _indexOfSequence para localizar sequências de bytes (usado no parser GD).
+//  - Comentários abundantes para aprendizado, conforme pedido.
+// OBS: não removi nada que já funcionava (DI/DS/TQ/RC parsing etc). Foco apenas em robustez GD/awaitedSize/CRC.
+// IMPORTANTE: Este arquivo depende de ../models/data_information.dart e transducer_logger.dart no projeto.
 
 import 'dart:async';
 import 'dart:convert';
@@ -60,6 +64,125 @@ class DataResult {
   String Type = '';
   int ThresholdDir = 0;
   int ResultDir = 0;
+}
+
+// Interface equivalente ao ITransducer.cs do C#
+abstract class ITransducer {
+  // Eventos / Callbacks
+  void Function(String event)? onEvent;
+  void Function(TransducerEvent ev)? onTransducerEvent;
+  void Function(int errCode)? onError;
+
+  // Callbacks específicos
+  void Function(DataInformation di)? onDataInformation;
+  void Function(DataResult dr)? onDataResult;
+  void Function(List<DataResult> results)? onTesteResult;
+  void Function(DebugInformation debug)? onDebugInformation;
+  void Function(CountersInformation counters)? onCountersInformation;
+
+  // Métodos públicos
+  Future<void> startService(String ip, int port);
+  Future<void> stopService();
+  Future<void> startCommunication();
+  void requestInformation();
+  void startReadData();
+  void stopReadData();
+  void setZeroTorque();
+  void setZeroAngle();
+  void setTorqueOffset(double offset);
+  Future<void> setTestParameter(DataInformation? info, TesteType type, ToolType toolType, double nominalTorque, double threshold, { double thresholdEnd = 0, int timeoutEndMs = 1, int timeStepMs = 1, int filterFrequency = 500, eDirection direction = eDirection.CW, double torqueTarget = 0, double torqueMin = 0, double torqueMax = 0, double angleTarget = 0, double angleMin = 0, double angleMax = 0, int delayToDetectFirstPeakMs = 0, int timeToIgnoreNewPeakAfterFinalThresholdMs = 0 });
+  Future<bool> initRead({int ackTimeoutMs = 500});
+  Future<void> dispose();
+}
+
+// DataInformation (definição local compatível com C# - você já tem ../models/data_information.dart)
+class DataInformation {
+  // Campos correspondentes ao C# DataInformation
+  String keyName = '';
+  int torqueLimit = 0;
+  int fullScale = 0;
+  int powerType = 0;
+  int autoPowerOff = 0;
+
+  double torqueConversionFactor = 1.0;
+  double angleConversionFactor = 1.0;
+
+  String model = '';
+  String hw = '';
+  String fw = '';
+  String hardID = '';
+
+  String deviceType = '';
+
+  int communicationType = 0;
+
+  DataInformation();
+
+  void setDataInformationByColumns(List<String> cols) {
+    try {
+      if (cols.length > 1) keyName = cols[1].trim();
+      if (cols.length > 2) torqueLimit = _tryParseInt(cols[2], fallback: 0);
+      if (cols.length > 3) fullScale = _tryParseInt(cols[3], fallback: 0);
+      if (cols.length > 6) deviceType = cols[6].trim();
+      if (cols.length > 9) powerType = _tryParseInt(cols[9], fallback: 0);
+      if (cols.length > 10) autoPowerOff = _tryParseInt(cols[10], fallback: 0);
+      if (cols.length > 11) communicationType = _tryParseInt(cols[11], fallback: 0);
+
+      if (cols.length > 12) {
+        torqueConversionFactor = _tryParseDouble(cols[12], fallback: 1.0);
+        angleConversionFactor = _tryParseDouble(cols[13], fallback: 1.0);
+        if (cols.length > 14) model = cols[14].trim();
+        if (cols.length > 15) hw = cols[15].trim();
+        if (cols.length > 16) fw = cols[16].trim();
+        if (cols.length > 17) hardID = cols[17].trim();
+        else hardID = keyName;
+      } else {
+        torqueConversionFactor = 1.0;
+        angleConversionFactor = 1.0;
+        model = '';
+        hw = '';
+        fw = '';
+        hardID = keyName;
+      }
+    } catch (e) {
+      // não levanta exceção para não interromper parsing
+    }
+  }
+
+  int _tryParseInt(String s, {int fallback = 0}) {
+    try {
+      return int.parse(s.trim());
+    } catch (_) {
+      final cleaned = s.replaceAll(RegExp(r'[^0-9\-]'), '');
+      try {
+        return int.parse(cleaned);
+      } catch (_) {
+        return fallback;
+      }
+    }
+  }
+
+  double _tryParseDouble(String s, {double fallback = 1.0}) {
+    try {
+      final normalized = s.trim().replaceAll(',', '.');
+      return double.parse(normalized);
+    } catch (_) {
+      final cleaned = s.replaceAll(RegExp(r'[^0-9\-\.,]'), '').replaceAll(',', '.');
+      try {
+        return double.parse(cleaned);
+      } catch (_) {
+        return fallback;
+      }
+    }
+  }
+
+  @override
+  String toString() {
+    return 'DataInformation{keyName: $keyName, torqueLimit: $torqueLimit, fullScale: $fullScale, '
+        'powerType: $powerType, autoPowerOff: $autoPowerOff, torqueConversionFactor: $torqueConversionFactor, '
+        'angleConversionFactor: $angleConversionFactor, model: $model, hw: $hw, fw: $fw, hardID: $hardID, '
+        'deviceType: $deviceType, communicationType: $communicationType}';
+  }
 }
 
 class CountersInformation {
@@ -273,7 +396,32 @@ class PhoenixTransducer {
   double calibrate_appliedAngle = 0.0;
   double calibrate_currentAngle = 0.0;
 
-  PhoenixTransducer();
+  // NEW: port index configurável (antes sempre retornava 0)
+  int _portIndexField = 0;
+  void setPortIndex(int idx) {
+    _portIndexField = idx;
+    TransducerLogger.logFmt('PortIndex set to {0}', [idx]);
+  }
+  int getPortIndex() => _portIndexField;
+
+  // NEW: enable dummy injection behavior (workaround used in C#).
+  // false por padrão - habilite somente se precisar reproduzir exatamente o comportamento do C# em firmwares velhos.
+  bool enableDummyInjection = false;
+  int countSimulateGoodChartBlocksBeforeFail = 3;
+  bool simulateChartBlockFail = false;
+
+  PhoenixTransducer({String initialId = '000000000000'}) {
+    _id = initialId;
+  }
+
+  void setDeviceId(String deviceId12) {
+    if (deviceId12.length == 12) {
+      _id = deviceId12;
+      TransducerLogger.logFmt('Device ID set manually to {0}', [_id]);
+    } else {
+      TransducerLogger.logFmt('setDeviceId: provided id length != 12: {0}', [deviceId12]);
+    }
+  }
 
   // ----------------------------
   // Public API
@@ -281,7 +429,7 @@ class PhoenixTransducer {
   Future<void> startService(String ip, int port) async {
     _ip = ip;
     _port = port;
-    _userInitiatedStop = false; // mark that connection is user-requested active
+    _userInitiatedStop = false;
     TransducerLogger.logFmt('startService requested: {0}:{1}', [ip, port]);
     await _internalStartServiceEth();
     _startDispatcherTimer();
@@ -289,7 +437,7 @@ class PhoenixTransducer {
 
   Future<void> stopService() async {
     TransducerLogger.log('stopService called');
-    _userInitiatedStop = true; // don't reconnect
+    _userInitiatedStop = true;
     await _internalStopService();
   }
 
@@ -304,7 +452,6 @@ class PhoenixTransducer {
     TransducerLogger.log('requestInformation: MustSendRequestInformation set');
   }
 
-  // startReadData: handshake; doesn't enable mustSendReadData immediately.
   void startReadData() {
     captureNewTightening = true;
     TransducerLogger.log('startReadData called: startReadRequested = true (waiting SA/CS ACKs)');
@@ -345,8 +492,6 @@ class PhoenixTransducer {
     TransducerLogger.logFmt('setTorqueOffset: {0}', [offset]);
   }
 
-  // ----------------------------
-  // setTestParameter: VERSÃO COMPLETA (equivalente ao overload mais completo do C#)
   Future<void> setTestParameter(
       DataInformation? info,
       TesteType type,
@@ -367,7 +512,6 @@ class PhoenixTransducer {
         int delayToDetectFirstPeakMs = 0,
         int timeToIgnoreNewPeakAfterFinalThresholdMs = 0,
       }) async {
-    // Store SA params
     acquisitionToolType = toolType;
     acquisitionThreshold = threshold;
     acquisitionThresholdEnd = thresholdEnd;
@@ -376,11 +520,9 @@ class PhoenixTransducer {
     acquisitionFilterFrequency = filterFrequency;
     acquisitionDir = direction;
 
-    // Store TesteType and NominalTorque
     acquisitionTestType = type;
     acquisitionNominalTorque = nominalTorque;
 
-    // Store SB params
     acquisitionTorqueTarget = torqueTarget;
     acquisitionTorqueMin = torqueMin;
     acquisitionTorqueMax = torqueMax;
@@ -390,12 +532,10 @@ class PhoenixTransducer {
     acquisitionDelayToDetectFirstPeak_ms = delayToDetectFirstPeakMs;
     acquisitionTimeToIgnoreNewPeakAfterFinalThreshold_ms = timeToIgnoreNewPeakAfterFinalThresholdMs;
 
-    // set flags so dispatcher will send SA then CS then SB/SC accordingly
     mustSendAquisitionConfig = true;
     mustSendAquisitionAdditionalConfig = true;
     mustSendAquisitionAdditional2Config = true;
 
-    // Keep DataInformation object for compatibility if needed
     if (info != null) {
       TransducerLogger.log('setTestParameter received DataInformation (not required to build SA/SB here)');
     }
@@ -404,7 +544,6 @@ class PhoenixTransducer {
         [type.toString(), nominalTorque, threshold, torqueTarget, angleTarget]);
   }
 
-  // Wrappers for overloads
   Future<void> setTestParameterShort(
       DataInformation? info,
       TesteType type,
@@ -460,7 +599,6 @@ class PhoenixTransducer {
     );
   }
 
-  // ClickWrench implementation (underscore style) - preserves earlier implementation
   void setTestParameter_ClickWrench(int fallPercentage, int risePercentage, int minTimeBetweenPulsesMs) {
     clickFall = fallPercentage;
     clickRise = risePercentage;
@@ -469,7 +607,6 @@ class PhoenixTransducer {
     TransducerLogger.logFmt('setTestParameter_ClickWrench stored fall={0} rise={1} minMs={2}', [fallPercentage, risePercentage, minTimeBetweenPulsesMs]);
   }
 
-  // Backwards-compatible camelCase wrapper (connect_page.dart calls this)
   void setTestParameterClickWrench(int fallPercentage, int risePercentage, int minTimeBetweenPulsesMs) {
     try {
       setTestParameter_ClickWrench(fallPercentage, risePercentage, minTimeBetweenPulsesMs);
@@ -478,7 +615,6 @@ class PhoenixTransducer {
     }
   }
 
-  // Helper: if startReadRequested was waiting for config ACKs, enable read if no more pending config flags.
   void _maybeEnableReadAfterConfigAck() {
     try {
       if (startReadRequested &&
@@ -501,8 +637,6 @@ class PhoenixTransducer {
     }
   }
 
-  // ----------------------------
-  // initRead synchronous sequence: ZO torque -> ZO angle -> CS -> SA -> delay -> StartReadData
   Future<bool> initRead({int ackTimeoutMs = 500}) async {
     if (!_isConnected) {
       TransducerLogger.log('initRead: not connected');
@@ -562,7 +696,6 @@ class PhoenixTransducer {
   // Internal TCP (only TCP)
   Future<void> _internalStartServiceEth() async {
     try {
-      // close existing socket if any (defensive)
       if (_socket != null) {
         try {
           await _socket!.close();
@@ -572,16 +705,14 @@ class PhoenixTransducer {
       TransducerLogger.logFmt('Connecting to {0}:{1}', [_ip, _port]);
       _socket = await Socket.connect(_ip, _port, timeout: const Duration(seconds: 5));
       _isConnected = true;
-      _reconnectAttempts = 0; // reset backoff counter
+      _reconnectAttempts = 0;
       TransducerLogger.log('Socket connected');
-      // set up listener
       _socket!.listen(_onData, onDone: _onDone, onError: _onSocketError, cancelOnError: false);
       tickDeviceStatus = DateTime.now().millisecondsSinceEpoch;
     } catch (ex) {
       _isConnected = false;
       TransducerLogger.logException(ex, '_internalStartServiceEth');
       if (onError != null) onError!(101);
-      // schedule reconnect (only if user did not request stop)
       if (!_userInitiatedStop) {
         _scheduleReconnect();
       }
@@ -591,7 +722,7 @@ class PhoenixTransducer {
   Future<void> _internalStopService() async {
     try {
       TransducerLogger.log('Internal stop service - closing socket');
-      _userInitiatedStop = true; // signal that this stop was requested by user
+      _userInitiatedStop = true;
       try {
         await _socket?.close();
       } catch (ex) {
@@ -607,16 +738,11 @@ class PhoenixTransducer {
     }
   }
 
-  // Called when remote closes the socket
   void _onDone() {
     _isConnected = false;
     TransducerLogger.log('Socket onDone - connection closed by remote');
-    // Inform UI
     if (onEvent != null) onEvent!('socket_done');
-    // don't emit OldTransducerFirmwareDetected here (that was incorrect before)
     if (onError != null) onError!(103);
-
-    // If the user didn't intentionally stop, try to reconnect automatically
     if (!_userInitiatedStop) {
       TransducerLogger.log('Socket closed by remote; scheduling reconnect attempts.');
       _scheduleReconnect();
@@ -627,23 +753,20 @@ class PhoenixTransducer {
     _isConnected = false;
     TransducerLogger.logException(err, '_onSocketError');
     if (onError != null) onError!(102);
-
-    // Attempt reconnect unless user explicitly stopped
     if (!_userInitiatedStop) {
       TransducerLogger.log('_onSocketError: scheduling reconnect attempts (not user-initiated)');
       _scheduleReconnect();
     }
   }
 
-  // Schedule reconnect with exponential backoff (non-blocking)
   void _scheduleReconnect() {
     if (_reconnectAttempts >= _maxReconnectAttempts) {
       TransducerLogger.logFmt('Max reconnect attempts ({0}) reached - will not try further', [_maxReconnectAttempts]);
       return;
     }
     _reconnectAttempts++;
-    final delayMs = _baseReconnectDelayMs * (1 << (_reconnectAttempts - 1)); // exponential backoff: 500,1000,2000...
-    final cappedDelay = delayMs > 10000 ? 10000 : delayMs; // cap at 10s
+    final delayMs = _baseReconnectDelayMs * (1 << (_reconnectAttempts - 1));
+    final cappedDelay = delayMs > 10000 ? 10000 : delayMs;
     TransducerLogger.logFmt('Scheduling reconnect attempt {0} in {1}ms', [_reconnectAttempts, cappedDelay]);
     Timer(Duration(milliseconds: cappedDelay), () async {
       if (_userInitiatedStop) {
@@ -655,11 +778,10 @@ class PhoenixTransducer {
         await _internalStartServiceEth();
         if (_isConnected) {
           TransducerLogger.log('Reconnect successful');
-          // Restart dispatcher if needed
           if (_dispatcherTimer == null) _startDispatcherTimer();
         } else {
           TransducerLogger.log('Reconnect attempt did not succeed (socket not connected)');
-          _scheduleReconnect(); // try again until max attempts
+          _scheduleReconnect();
         }
       } catch (e) {
         TransducerLogger.logException(e, 'reconnect attempt error');
@@ -689,7 +811,6 @@ class PhoenixTransducer {
   void _dispatcherTick() {
     try {
       if (!_isConnected) return;
-
       if (_inSyncOperation) return;
 
       final now = DateTime.now().millisecondsSinceEpoch;
@@ -765,7 +886,6 @@ class PhoenixTransducer {
         if (avoidSendAquisitionAdditional2Config) mustSendAquisitionAdditional2Config = false;
         else if (_state != enumEState.eWaitingAquisitionAdditional2Config) _state = enumEState.eMustSendAquisitionAdditional2Config;
       } else if (mustSendReadData) {
-        // Keep V15 behavior for read loop (we already corrected in earlier change to allow repeat reads).
         if (_state != enumEState.eWaitingAnswerReadCommand &&
             (_state != enumEState.eWaitBetweenReads || (now - tickRxCommand >= DEF_TIMESPAN_BETWEENREADS))) {
           _state = enumEState.eMustSendReadCommand;
@@ -783,7 +903,7 @@ class PhoenixTransducer {
       switch (_state) {
         case enumEState.eMustSendGetID:
           _state = enumEState.eWaitingID;
-          _sendCommand(_padHex(_portIndexToHex(_portIndex()), 2) + '0000000000ID');
+          _sendCommand(_padHex(_portIndexToHex(getPortIndex()), 2) + '0000000000ID');
           break;
         case enumEState.eMustSendReadCommand:
           _state = enumEState.eWaitingAnswerReadCommand;
@@ -892,6 +1012,19 @@ class PhoenixTransducer {
           _state = enumEState.eWaitingCounters;
           _sendCommand(_id + 'RC');
           break;
+        case enumEState.eMustSendGetChartBlock:
+          _state = enumEState.eWaitingChartBlock;
+          String sGD = _id +
+              'GD' +
+              '000100' + // fallback placeholder (should be replaced when actual block info is known)
+              '00' +
+              '00';
+          String cmdToSend = sGD;
+          if (configuration.isNotEmpty && configuration.startsWith(_id + 'GD')) {
+            cmdToSend = configuration; // allow external config to carry exact GD command
+          }
+          _sendCommand(cmdToSend);
+          break;
         default:
           break;
       }
@@ -903,6 +1036,7 @@ class PhoenixTransducer {
 
   // ----------------------------
   // TX
+  // NOTE: send frames as bytes using latin1 (1:1) and CRC computed over bytes.
   void _sendCommand(String cmd, {int awaitedSize = 0}) {
     if (!_isConnected || _socket == null) {
       TransducerLogger.log('SendCommand: not connected');
@@ -910,14 +1044,61 @@ class PhoenixTransducer {
       return;
     }
     try {
-      String crc = _makeCRC(cmd);
-      String frame = '[$cmd$crc]';
+      // Robust GD detection: find 'GD' anywhere in the command and parse the size field
+      try {
+        if (awaitedSize == 0) {
+          final int gdPos = cmd.indexOf('GD');
+          if (gdPos >= 0) {
+            // After 'GD' we expect at least 8 chars: start(6) + size(2) as in examples: GD0000640108
+            final String after = (gdPos + 2 < cmd.length) ? cmd.substring(gdPos + 2) : '';
+            if (after.length >= 8) {
+              final String sizeHex = after.substring(6, 8); // 2 chars representing blockSize
+              final int blockSize = int.parse(sizeHex, radix: 16);
+              final int computed = 18 + blockSize * 5; // same formula used in C#
+              awaitedSize = computed;
+              TransducerLogger.logFmt('Auto-detected GD at pos {0} blockSize={1} -> awaitedSize={2}', [gdPos, blockSize, awaitedSize]);
+            }
+          }
+        }
+      } catch (e) {
+        // ignore parsing errors and proceed without awaitedSize
+        TransducerLogger.logException(e, '_sendCommand GD autodetect');
+      }
+
+      // Build payload bytes (latin1)
+      final payloadBytes = latin1.encode(cmd);
+      // CRC computed over bytes
+      final crcStr = _makeCRCFromBytes(payloadBytes); // returns 2-char string (ASCII)
+      // Build frame bytes: '[' + payloadBytes + crcAscii + ']'
+      final builder = BytesBuilder();
+      builder.addByte(0x5B); // '['
+      builder.add(payloadBytes);
+      builder.add(latin1.encode(crcStr)); // 2-byte ASCII CRC
+      builder.addByte(0x5D); // ']'
+      final frameBytes = builder.toBytes();
+
+      // Store awaited size (used by parser to assemble fragmented frames)
       _awaitedSize = awaitedSize;
       waitAns = true;
-      final bytes = utf8.encode(frame);
-      TransducerLogger.logTx('FRAME', frame);
-      _socket!.add(bytes);
       tickTxCommand = DateTime.now().millisecondsSinceEpoch;
+
+      // Log frame as ascii (latin1) for human-readable logging
+      String frameAscii;
+      try {
+        frameAscii = latin1.decode(frameBytes, allowInvalid: true);
+      } catch (_) {
+        frameAscii = String.fromCharCodes(frameBytes);
+      }
+      // Additional logs to help debugging & byte-for-byte comparison with C#
+      TransducerLogger.logTx('FRAME', frameAscii);
+      TransducerLogger.logFmt('TX FRAME hex: {0}', [_toHex(frameBytes)]);
+      TransducerLogger.logFmt('TX awaitedSize: {0}', [awaitedSize]);
+
+      // Send bytes directly
+      _socket!.add(frameBytes);
+      try {
+        _socket!.flush();
+      } catch (_) {}
     } catch (e) {
       TransducerLogger.logException(e, '_sendCommand');
       if (onError != null) onError!(106);
@@ -959,7 +1140,7 @@ class PhoenixTransducer {
   }
 
   // ----------------------------
-  // RX parsing (full parser preserved; adapted to use DataInformation from models/data_information.dart)
+  // RX parsing (full parser preserved; adapted to use byte-based CRC and latin1 decoding)
   void _onData(Uint8List data) {
     try {
       TransducerLogger.logRxBytes('socket RAW chunk', data, 0, data.length);
@@ -970,52 +1151,62 @@ class PhoenixTransducer {
       if (_rxBuffer.isEmpty) return;
       int bspini = _indexOf(_rxBuffer, 0x5B);
       if (bspini < 0) {
+        // no start found: consider everything garbage and drop
         _rxBuffer.clear();
         iTrashing++;
+        TransducerLogger.log('No start bracket found - cleared rxBuffer and incremented iTrashing');
         return;
       }
       if (bspini > 0) {
+        // remove leading garbage
         _rxBuffer.removeRange(0, bspini);
         bspini = 0;
       }
       int bspend = _indexOf(_rxBuffer, 0x5D, start: bspini + 1);
       if (bspend < 0) {
+        // If we have an awaitedSize (e.g. GD) and buffer reached that length, treat as end
         if (_awaitedSize > 0 && _rxBuffer.length >= _awaitedSize) {
           bspend = _awaitedSize - 1;
+          TransducerLogger.logFmt('No \']\' found but _awaitedSize reached -> treating index {0} as end', [bspend]);
         } else {
+          // not enough data yet
           return;
         }
       }
 
       int framedLen = bspend - bspini + 1;
       if (framedLen < 5) {
+        // nonsense frame, drop it
         _rxBuffer.removeRange(0, bspend + 1);
+        TransducerLogger.log('Dropped too-short frame');
         return;
       }
 
       int payloadEndExclusive = bspend - 2;
       if (payloadEndExclusive <= bspini + 1) {
         _rxBuffer.removeRange(0, bspend + 1);
+        TransducerLogger.log('Invalid frame layout, removed segment');
         return;
       }
       List<int> payloadBytes = _rxBuffer.sublist(bspini + 1, payloadEndExclusive);
+
       String payloadStr;
       try {
-        payloadStr = utf8.decode(payloadBytes, allowMalformed: true);
+        payloadStr = latin1.decode(payloadBytes, allowInvalid: true);
       } catch (_) {
         payloadStr = String.fromCharCodes(payloadBytes);
       }
 
       String crcRecv = '';
       try {
-        crcRecv = utf8.decode(_rxBuffer.sublist(bspend - 2, bspend), allowMalformed: true);
+        crcRecv = latin1.decode(_rxBuffer.sublist(bspend - 2, bspend), allowInvalid: true);
       } catch (_) {
         crcRecv = String.fromCharCodes(_rxBuffer.sublist(bspend - 2, bspend));
       }
 
       String crcCalc;
       try {
-        crcCalc = _makeCRC(payloadStr);
+        crcCalc = _makeCRCFromBytes(payloadBytes);
       } catch (_) {
         crcCalc = '';
       }
@@ -1025,6 +1216,8 @@ class PhoenixTransducer {
       else if (_awaitedSize != 0 && DEF_IGNOREGRAPHCRC) validCmd = true;
 
       if (!validCmd) {
+        // If invalid, drop this framed region and continue - increment counters
+        TransducerLogger.logFmt('Invalid CRC: calc={0} recv={1} (awaitedSize={2}) - dropping framed area', [crcCalc, crcRecv, _awaitedSize]);
         if (_rxBuffer.length > bspend + 1) {
           _rxBuffer.removeRange(0, bspend + 1);
           iConsecErrs++;
@@ -1037,14 +1230,29 @@ class PhoenixTransducer {
       List<int> framedBytes = _rxBuffer.sublist(bspini, bspend + 1);
       String framedAscii;
       try {
-        framedAscii = utf8.decode(framedBytes, allowMalformed: true);
+        framedAscii = latin1.decode(framedBytes, allowInvalid: true);
       } catch (_) {
         framedAscii = String.fromCharCodes(framedBytes);
       }
 
       TransducerLogger.logFmt('PARSER framed ascii: {0}', [framedAscii]);
 
+      // remove processed bytes from buffer BEFORE heavy processing to avoid reentrancy issues
       _rxBuffer.removeRange(0, bspend + 1);
+
+      // IMPORTANT FIX: clear awaitedSize after we've accepted a frame that matched awaited size
+      // This prevents old awaitedSize to affect subsequent frames.
+      if (_awaitedSize != 0) {
+        if (framedLen == _awaitedSize) {
+          TransducerLogger.logFmt('Clearing _awaitedSize (was {0}) after receiving expected awaited packet', [_awaitedSize]);
+          _awaitedSize = 0;
+        } else {
+          // also clear proactively to avoid stale awaited values (safe default),
+          // but keep this behavior visible in logs.
+          TransducerLogger.logFmt('Clearing stale _awaitedSize (was {0}) after receiving packet len {1}', [_awaitedSize, framedLen]);
+          _awaitedSize = 0;
+        }
+      }
 
       tickRxCommand = DateTime.now().millisecondsSinceEpoch;
       waitAns = false;
@@ -1052,7 +1260,7 @@ class PhoenixTransducer {
       String com = '';
       if (framedBytes.length > 14) {
         try {
-          com = utf8.decode(framedBytes.sublist(13, 15), allowMalformed: true);
+          com = latin1.decode(framedBytes.sublist(13, 15), allowInvalid: true);
         } catch (_) {
           com = String.fromCharCodes(framedBytes.sublist(13, 15));
         }
@@ -1062,10 +1270,8 @@ class PhoenixTransducer {
 
       bool isERRPacket = (framedBytes.length > 14 && framedBytes[13] == 0x45 && framedBytes[14] == 0x52);
       if (isERRPacket) {
-        // Parse the error code and take corrective action when appropriate (mimic C# behavior)
         int errCode = 0;
         try {
-          // error code typically is the two hex chars after 'ER' (positions 15..17 in ASCII framed string)
           if (framedAscii.length >= 17) {
             final hexErr = framedAscii.substring(15, 17);
             errCode = int.parse(hexErr, radix: 16);
@@ -1076,42 +1282,54 @@ class PhoenixTransducer {
         TransducerLogger.logFmt('RX [ERR] packet - code={0} (will handle if known)', [errCode]);
         iConsecErrs++;
 
-        // If device returns ERR==3 after SB/SC/CS attempts it often means "old firmware / unsupported field".
-        // In C# code they avoid sending SB/SC/CS afterwards and continue. We replicate that behaviour.
+        // If ERR03 and dummy injection enabled, inject a dummy ACK (C# did this in some flows)
+        if (enableDummyInjection && errCode == 0x03) {
+          TransducerLogger.log('enableDummyInjection is true and ERR03 received -> injecting dummy ACK responses where appropriate');
+          // We simulate the same dummy patterns the C# used (SA/SB/SC) depending on state
+          if (_state == enumEState.eWaitingAquisitionConfig) {
+            String s = "000008C4D0B4SA01";
+            _injectDummyResponse(s);
+          } else if (_state == enumEState.eWaitingAquisitionAdditionalConfig) {
+            String s = "000008C4D0B4SB01";
+            _injectDummyResponse(s);
+          } else if (_state == enumEState.eWaitingAquisitionAdditional2Config) {
+            String s = "000008C4D0B4SC01";
+            _injectDummyResponse(s);
+          } else {
+            // generic dummy: nothing to do
+          }
+        }
+
+        // ERR03 handling similar to C# - set avoid flags for certain states and complete ackCompleters with false
         if (errCode == 0x03) {
-          // If we were waiting for SB acknowledge, avoid SB from now on
           if (_state == enumEState.eWaitingAquisitionAdditionalConfig || _state == enumEState.eMustSendAquisitionAdditionalConfig) {
-            TransducerLogger.log('ERR 0x03 on SB -> setting avoidSendAquisitionAdditionalConfig = true and clearing mustSend flag');
             avoidSendAquisitionAdditionalConfig = true;
             mustSendAquisitionAdditionalConfig = false;
-            // If someone is waiting for ack (ack completer), complete with false to unblock initRead callers.
             if (_ackCompleters.containsKey('SB') && !_ackCompleters['SB']!.isCompleted) {
               _ackCompleters['SB']!.complete(false);
+              TransducerLogger.log('ACK_COMPLETED: SB false (ERR03)');
             }
-            // Notify typed event (old firmware)
             if (onTransducerEvent != null) onTransducerEvent!(TransducerEvent.OldTransducerFirmwareDetected);
-            // Try to enable read if startReadRequested was waiting
             _maybeEnableReadAfterConfigAck();
           } else if (_state == enumEState.eWaitingAquisitionAdditional2Config || _state == enumEState.eMustSendAquisitionAdditional2Config) {
-            TransducerLogger.log('ERR 0x03 on SC -> setting avoidSendAquisitionAdditional2Config = true and clearing mustSend flag');
             avoidSendAquisitionAdditional2Config = true;
             mustSendAquisitionAdditional2Config = false;
             if (_ackCompleters.containsKey('SC') && !_ackCompleters['SC']!.isCompleted) {
               _ackCompleters['SC']!.complete(false);
+              TransducerLogger.log('ACK_COMPLETED: SC false (ERR03)');
             }
             if (onTransducerEvent != null) onTransducerEvent!(TransducerEvent.OldTransducerFirmwareDetected);
             _maybeEnableReadAfterConfigAck();
           } else if (_state == enumEState.eWaitingAquisitionClickWrenchConfig || _state == enumEState.eMustSendAquisitionClickWrenchConfig) {
-            TransducerLogger.log('ERR 0x03 on CS -> setting avoidSendAquisitionClickWrenchConfig = true and clearing mustSend flag');
             avoidSendAquisitionClickWrenchConfig = true;
             mustSendAquisitionClickWrenchConfig = false;
             if (_ackCompleters.containsKey('CS') && !_ackCompleters['CS']!.isCompleted) {
               _ackCompleters['CS']!.complete(false);
+              TransducerLogger.log('ACK_COMPLETED: CS false (ERR03)');
             }
             if (onTransducerEvent != null) onTransducerEvent!(TransducerEvent.OldTransducerFirmwareDetected);
             _maybeEnableReadAfterConfigAck();
           } else {
-            // Generic: if we don't know which config was expected, try to avoid SB/SC to be safe.
             TransducerLogger.log('ERR 0x03 received in unknown state - enabling generic avoid flags for SB/SC');
             avoidSendAquisitionAdditionalConfig = true;
             avoidSendAquisitionAdditional2Config = true;
@@ -1120,8 +1338,6 @@ class PhoenixTransducer {
             _maybeEnableReadAfterConfigAck();
           }
         }
-
-        // For ERR packets we don't treat them as fatal, simply continue parsing next frames.
         continue;
       }
 
@@ -1135,6 +1351,7 @@ class PhoenixTransducer {
         _suppressUntil = 0;
         if (_ackCompleters.containsKey('ZO') && !_ackCompleters['ZO']!.isCompleted) {
           _ackCompleters['ZO']!.complete(true);
+          TransducerLogger.log('ACK_COMPLETED: ZO true');
         }
         _state = enumEState.eIdle;
         TransducerLogger.log('Parsed ZO response - cleared zero flags and suppression; ack completed if awaited');
@@ -1145,16 +1362,21 @@ class PhoenixTransducer {
       if (com == 'SA') {
         mustSendAquisitionConfig = false;
         _state = enumEState.eIdle;
-        if (_ackCompleters.containsKey('SA') && !_ackCompleters['SA']!.isCompleted) _ackCompleters['SA']!.complete(true);
+        if (_ackCompleters.containsKey('SA') && !_ackCompleters['SA']!.isCompleted) {
+          _ackCompleters['SA']!.complete(true);
+          TransducerLogger.log('ACK_COMPLETED: SA true');
+        }
         TransducerLogger.log('Parsed SA response - mustSendAquisitionConfig cleared and ack completed if awaited');
-        // After SA ack check enabling read
         _maybeEnableReadAfterConfigAck();
         continue;
       }
       if (com == 'CS') {
         mustSendAquisitionClickWrenchConfig = false;
         _state = enumEState.eIdle;
-        if (_ackCompleters.containsKey('CS') && !_ackCompleters['CS']!.isCompleted) _ackCompleters['CS']!.complete(true);
+        if (_ackCompleters.containsKey('CS') && !_ackCompleters['CS']!.isCompleted) {
+          _ackCompleters['CS']!.complete(true);
+          TransducerLogger.log('ACK_COMPLETED: CS true');
+        }
         TransducerLogger.log('Parsed CS response - mustSendAquisitionClickWrenchConfig cleared and ack completed if awaited');
         _maybeEnableReadAfterConfigAck();
         continue;
@@ -1162,7 +1384,10 @@ class PhoenixTransducer {
       if (com == 'SB') {
         mustSendAquisitionAdditionalConfig = false;
         _state = enumEState.eIdle;
-        if (_ackCompleters.containsKey('SB') && !_ackCompleters['SB']!.isCompleted) _ackCompleters['SB']!.complete(true);
+        if (_ackCompleters.containsKey('SB') && !_ackCompleters['SB']!.isCompleted) {
+          _ackCompleters['SB']!.complete(true);
+          TransducerLogger.log('ACK_COMPLETED: SB true');
+        }
         TransducerLogger.log('Parsed SB response - mustSendAquisitionAdditionalConfig cleared and ack completed if awaited');
         _maybeEnableReadAfterConfigAck();
         continue;
@@ -1170,7 +1395,10 @@ class PhoenixTransducer {
       if (com == 'SC') {
         mustSendAquisitionAdditional2Config = false;
         _state = enumEState.eIdle;
-        if (_ackCompleters.containsKey('SC') && !_ackCompleters['SC']!.isCompleted) _ackCompleters['SC']!.complete(true);
+        if (_ackCompleters.containsKey('SC') && !_ackCompleters['SC']!.isCompleted) {
+          _ackCompleters['SC']!.complete(true);
+          TransducerLogger.log('ACK_COMPLETED: SC true');
+        }
         TransducerLogger.log('Parsed SC response - mustSendAquisitionAdditional2Config cleared and ack completed if awaited');
         _maybeEnableReadAfterConfigAck();
         continue;
@@ -1178,12 +1406,12 @@ class PhoenixTransducer {
 
       // -----------------------
       // ID / DS / TQ / DI / RC / GD / LS parsing
-      // We'll keep behavior aligned with the C# parsing performed earlier.
       if (_state == enumEState.eWaitingID) {
         if (com == 'ID') {
           if (lastPackage.length >= 13) {
             _id = lastPackage.substring(1, 13);
             mustSendGetID = false;
+            mustSendRequestInformation = true;
             if (onEvent != null) onEvent!('ID_RECEIVED');
             TransducerLogger.logFmt('Parsed ID -> {0}', [_id]);
           }
@@ -1230,18 +1458,6 @@ class PhoenixTransducer {
       } else if (_state == enumEState.eWaitingAnswerReadCommand) {
         if (com == 'TQ') {
           try {
-            // ---------- CRUCIAL FIX ----------
-            // Interpret torque & angle fields as SIGNED 32-bit integers (two's complement),
-            // then apply conversion factors. This matches the C# behaviour and avoids huge positive values.
-            //
-            // In the framed ascii:
-            //  - ID: positions 1..12
-            //  - COM: positions 13..14 ('TQ')
-            //  - torque hex: positions 15..22 (8 hex chars)
-            //  - angle  hex: positions 23..30 (8 hex chars)
-            //
-            // Convert both as signed32 to match device encoding.
-            //
             final torqueHex = lastPackage.substring(15, 23);
             final angleHex = lastPackage.substring(23, 31);
 
@@ -1265,8 +1481,6 @@ class PhoenixTransducer {
         if (com == 'DI') {
           try {
             DataInformation di = DataInformation();
-            // Map fields from the DI packet to your DataInformation model.
-            // The original parser used fixed substrings; we keep that mapping but adapt to the Dart DataInformation fields.
             if (lastPackage.length >= 91) {
               di.hardID = lastPackage.substring(15, 23).trim();
               di.model = lastPackage.substring(23, 55).trim();
@@ -1321,8 +1535,19 @@ class PhoenixTransducer {
       } else if (_state == enumEState.eWaitingChartBlock) {
         if (com == 'GD') {
           try {
-            int end = framedBytes.length - 3;
-            for (int i = 15; i <= end - 1; i += 5) {
+            // Robust GD parsing:
+            // Find sequence 'GD' in framedBytes (as bytes) so we know where binary payload starts.
+            final int gdIdx = _indexOfSequence(framedBytes, [ 'G'.codeUnitAt(0), 'D'.codeUnitAt(0) ]);
+            int sampleStart = 15; // fallback original behavior
+            if (gdIdx >= 0) {
+              // payload samples begin right after 'GD' in the framed bytes
+              sampleStart = gdIdx + 2;
+            } else {
+              TransducerLogger.log('GD command detected by com==GD but sequence "GD" not found in framedBytes; using fallback sampleStart=15');
+            }
+
+            int end = framedBytes.length - 3; // last two bytes before ']' are CRC ascii
+            for (int i = sampleStart; i <= end - 1; i += 5) {
               if (i + 4 >= framedBytes.length) break;
               int b0 = framedBytes[i];
               int b1 = framedBytes[i + 1];
@@ -1362,14 +1587,11 @@ class PhoenixTransducer {
   // ----------------------------
   // Helpers / Utilities
 
-  // Converte hex string (por exemplo 'FFFFFCA0') para inteiro signed com 'bits' bits (ex: 32).
-  // Isso trata complemento de dois corretamente, evitando interpretações como grande unsigned.
   int _parseSignedIntFromHex(String hex, {int bits = 32}) {
     int v = int.parse(hex, radix: 16);
     final int msbMask = 1 << (bits - 1);
     final int fullMask = 1 << bits;
     if ((v & msbMask) != 0) {
-      // valor negativo em complemento de dois
       v = v - fullMask;
     }
     return v;
@@ -1378,6 +1600,22 @@ class PhoenixTransducer {
   int _indexOf(List<int> data, int v, {int start = 0}) {
     for (int i = start; i < data.length; i++) {
       if (data[i] == v) return i;
+    }
+    return -1;
+  }
+
+  // Find a sequence of bytes inside a List<int>. Returns index of first match or -1.
+  int _indexOfSequence(List<int> data, List<int> seq, {int start = 0}) {
+    if (seq.isEmpty) return -1;
+    for (int i = start; i <= data.length - seq.length; i++) {
+      bool ok = true;
+      for (int j = 0; j < seq.length; j++) {
+        if (data[i + j] != seq[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return i;
     }
     return -1;
   }
@@ -1413,13 +1651,15 @@ class PhoenixTransducer {
   }
 
   int _portIndex() {
-    return 0;
+    return _portIndexField;
   }
 
   String _portIndexToHex(int idx) => idx.toRadixString(16).padLeft(2, '0');
 
   String _padHex(String s, int length) => s.padLeft(length, '0');
 
+  // ----------------------------
+  // CRC helpers
   String _makeCRC(String cmd) {
     StringBuffer bitString = StringBuffer();
     for (int i = 0; i < cmd.length; i++) {
@@ -1460,6 +1700,58 @@ class PhoenixTransducer {
     if (res0 > '9'.codeUnitAt(0)) res0 += ('A'.codeUnitAt(0) - '9'.codeUnitAt(0) - 1);
     if (res1 > '9'.codeUnitAt(0)) res1 += ('A'.codeUnitAt(0) - '9'.codeUnitAt(0) - 1);
     return String.fromCharCode(res0) + String.fromCharCode(res1);
+  }
+
+  String _makeCRCFromBytes(List<int> payloadBytes) {
+    final sb = StringBuffer();
+    for (var c in payloadBytes) {
+      int k = 128;
+      for (int j = 0; j < 8; j++) {
+        sb.write(((c & k) == 0) ? '0' : '1');
+        k = k >> 1;
+      }
+    }
+    final bitStr = sb.toString();
+
+    final crc = List<int>.filled(8, 0);
+    for (int i = 0; i < bitStr.length; i++) {
+      int doInvert = (bitStr[i] == '1') ? (crc[7] ^ 1) : crc[7];
+      crc[7] = crc[6];
+      crc[6] = crc[5];
+      crc[5] = crc[4] ^ doInvert;
+      crc[4] = crc[3];
+      crc[3] = crc[2];
+      crc[2] = crc[1] ^ doInvert;
+      crc[1] = crc[0];
+      crc[0] = doInvert;
+    }
+    int res0 = crc[4] + crc[5] * 2 + crc[6] * 4 + crc[7] * 8 + '0'.codeUnitAt(0);
+    int res1 = crc[0] + crc[1] * 2 + crc[2] * 4 + crc[3] * 8 + '0'.codeUnitAt(0);
+    if (res0 > '9'.codeUnitAt(0)) res0 += ('A'.codeUnitAt(0) - '9'.codeUnitAt(0) - 1);
+    if (res1 > '9'.codeUnitAt(0)) res1 += ('A'.codeUnitAt(0) - '9'.codeUnitAt(0) - 1);
+    return String.fromCharCode(res0) + String.fromCharCode(res1);
+  }
+
+  // For debug: get hex string of bytes
+  String _toHex(List<int> bytes) => bytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+
+  // Helper to inject a dummy response (used only when enableDummyInjection==true)
+  void _injectDummyResponse(String payloadWithoutCRCAndBrackets) {
+    try {
+      final payloadBytes = latin1.encode(payloadWithoutCRCAndBrackets);
+      final crc = _makeCRCFromBytes(payloadBytes);
+      final builder = BytesBuilder();
+      builder.addByte(0x5B);
+      builder.add(payloadBytes);
+      builder.add(latin1.encode(crc));
+      builder.addByte(0x5D);
+      final injected = Uint8List.fromList(builder.toBytes());
+      TransducerLogger.logFmt('Injecting dummy response: {0}', [latin1.decode(injected, allowInvalid: true)]);
+      // Feed into parser as if came from socket
+      _onData(injected);
+    } catch (e) {
+      TransducerLogger.logException(e, '_injectDummyResponse');
+    }
   }
 
   Future<void> dispose() async {

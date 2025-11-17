@@ -12,6 +12,8 @@ using ITransducers;
 using Transducers;
 using System.IO;
 using System.Diagnostics;
+using Transducer_Estudo;
+
 
 using Transducer_Estudo;
 
@@ -141,6 +143,40 @@ namespace Transducer_Estudo
             lblTorque.Text = "0 Nm";
 
             TransducerLogger.Log("btnReadData_Click - calling InitRead()");
+
+
+            // --- NOVO: gravação no log de protocolo por sessão ---
+            // ProtocolFileLogger.WriteProtocol(direction, text, rawBytes = null)
+            // direction: "SYS" / "TX" / "RX" (uso "SYS" para eventos de sistema/ação do usuário)
+            try
+            {
+                // Mensagem textual que será gravada no arquivo de protocolo
+                string protoMsg = "UI BUTTON: btnReadData clicked by user";
+
+                // Escreve no arquivo de protocolo (texto + sem bytes)
+                ProtocolFileLogger.WriteProtocol("SYS", protoMsg, null);
+
+                // Se desejar gravar também os bytes associados ao evento (opcional)
+                // Exemplo: gravar um marcador em bytes (não necessário para identificar o clique)
+                // byte[] marker = Encoding.UTF8.GetBytes(protoMsg);
+                // ProtocolFileLogger.WriteProtocol("SYS", protoMsg, marker);
+            }
+            catch (Exception ex)
+            {
+                // Não deixe uma falha de logging interromper a UI
+                TransducerLogger.LogException(ex, "ProtocolFileLogger write error in btnReadData_Click");
+            }
+
+
+
+
+
+
+
+
+
+
+
             InitRead();
         }
 
@@ -370,11 +406,10 @@ namespace Transducer_Estudo
         private void btnConnectIP_Click(object sender, EventArgs e)
         {
             TransducerLogger.Log("btnConnectIP_Click - starting IP connection flow");
+            //ProtocolFileLogger.WriteProtocol()
 
             if (Trans != null)
-                //TransducerLogger.LogFmt("dentro do botão connect Ip" ,Trans);
-                //TransducerLogger.LogFmt("StartService_Eth: discarded initial bytes={0} msg='{1}'", bytes, message);
-
+                
             {
                 TransducerLogger.Log("btnConnectIP_Click - stopping previous transducer (StopReadData/StopService)");
                 Trans.StopReadData();
@@ -402,12 +437,55 @@ namespace Transducer_Estudo
 
             TransducerLogger.Log("btnConnectIP_Click - started service, requested info, timer started");
             timer1.Start();
+
+            try
+            {
+                // Mensagem textual que será gravada no arquivo de protocolo
+                string protoMsg = "UI BUTTON: btnConnectIP clicked by user";
+
+                // Escreve no arquivo de protocolo (texto + sem bytes)
+                ProtocolFileLogger.WriteProtocol("SYS", protoMsg, null);
+
+            }
+            catch (Exception ex)
+            {
+                // Não deixe uma falha de logging interromper a UI
+                TransducerLogger.LogException(ex, "ProtocolFileLogger write error in btnConnectIP_Click");
+            }
+
+
+
+
         }
+
+
 
         // Botão desconectar - log
         private void btnDisconnect2_Click(object sender, EventArgs e)
         {
             btnDisconnect_Click(sender, e);
+
+
+            try
+            {
+                // Mensagem textual que será gravada no arquivo de protocolo
+                string protoMsg = "UI BUTTON: btnDisconnect clicked by user";
+
+                // Escreve no arquivo de protocolo (texto + sem bytes)
+                ProtocolFileLogger.WriteProtocol("SYS", protoMsg, null);
+
+            }
+            catch (Exception ex)
+            {
+                // Não deixe uma falha de logging interromper a UI
+                TransducerLogger.LogException(ex, "ProtocolFileLogger write error in btnDisconnect_Click");
+            }
+
+
+
+
+
+
         }
 
         private void btnDisconnect_Click(object sender, EventArgs e)

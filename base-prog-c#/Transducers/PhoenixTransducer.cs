@@ -438,6 +438,12 @@ namespace Transducers
                     Write2Log("-- USER START SERVICE: " + value);
                     // LOG adicional
                     try { TransducerLogger.LogFmt("USER START SERVICE: {0}", value); } catch { }
+
+                    // Also write system event to protocol log
+                    try { ProtocolFileLogger.WriteProtocol("SYS", "-- USER START SERVICE: " + value, null); } catch { }
+
+
+
                 }
             }
         }
@@ -452,6 +458,12 @@ namespace Transducers
 
                     Write2Log("-- PORT OPEN: " + value);
                     try { TransducerLogger.LogFmt("PORT OPEN: {0}", value); } catch { }
+
+                    // Also write system event to protocol log
+                    try { ProtocolFileLogger.WriteProtocol("SYS", "-- PORT OPEN: " + value, null); } catch { }
+
+
+
                 }
             }
         }
@@ -1437,6 +1449,11 @@ namespace Transducers
             {
                 Write2Log("timeout:" + printstring);
                 TransducerLogger.LogFmt("Timeouted: {0} (tick={1} timeout={2})", printstring, tick, timeout);
+
+                // Also write timeout to protocol log
+                try { ProtocolFileLogger.WriteProtocol("SYS", "timeout:" + printstring, null); } catch { }
+
+
             }
             return ret;
         }
@@ -1615,6 +1632,12 @@ namespace Transducers
                         string cmdout = "[" + cmd + makeCRC(cmd) + "]";
                         _awaitedsize = awaitedsize;
 
+
+
+
+
+
+
                         // LOG: comando final (com CRC) que será enviado (texto)
                         try { TransducerLogger.LogFmt("TX -> {0}", cmdout); } catch { }
 
@@ -1623,6 +1646,10 @@ namespace Transducers
                         {
                             byte[] txBytes = Encoding.UTF8.GetBytes(cmdout);
                             TransducerLogger.LogHex("TX BYTES", txBytes, 0, txBytes.Length);
+
+                            ProtocolFileLogger.WriteProtocol("TX Bytes", cmdout, txBytes);
+
+
                         }
                         catch { }
 
@@ -1926,6 +1953,8 @@ namespace Transducers
             {
                 Write2Log("dtRX closing", true);
                 TransducerLogger.Log("serialPort_DataReceived: exit early - bClosing true");
+                try { ProtocolFileLogger.WriteProtocol("RX", "dtRX closing", null); } catch { }
+
                 return;
             }
 
@@ -2015,6 +2044,9 @@ namespace Transducers
                                             offset += bs.Length;
                                             TransducerLogger.LogFmt("Simulated RX used, offset now {0}", offset);
                                             TransducerLogger.LogHex("simulated RAW", bs, 0, offset);
+                                            try { ProtocolFileLogger.WriteProtocol("RX", "SIMULATED RAW", bs); } catch { }
+
+
                                         }
                                     }
                                     else
@@ -2041,6 +2073,24 @@ namespace Transducers
                                                         Debug.Print("------ READ ---------:" + message);
                                                         bs = Encoding.UTF8.GetBytes(message);
                                                         offset += bytes;
+
+
+
+                                                        // log raw part read from socket to protocol (incremental)
+                                                        try
+                                                        {
+                                                            byte[] rawpart = new byte[bytes];
+                                                            Array.Copy(data, 0, rawpart, 0, bytes);
+                                                            ProtocolFileLogger.WriteProtocol("RX", "socket read partial", rawpart);
+                                                        }
+                                                        catch { }
+
+
+
+
+
+
+
                                                     }
                                                 }
                                                 else
@@ -2053,6 +2103,8 @@ namespace Transducers
                                         {
                                             Debug.Print("Err:" + ex.Message + " details:" + (ex.InnerException != null ? ex.InnerException.Message : "") + " " + System.Environment.TickCount);
                                             TransducerLogger.LogException(ex, "socket.Read exception in serialPort_DataReceived");
+                                            try { ProtocolFileLogger.WriteProtocol("SYS", "socket.Read exception: " + ex.Message, null); } catch { }
+
                                         }
                                     }
                                     if (offset == 0)
@@ -2079,6 +2131,9 @@ namespace Transducers
                                     {
                                         Debug.Print("Abort garbage. bytes:" + offset + " as:" + _awaitedsize + " mes:" + message + " s:" + _state + " pi:" + _PortIndex);
                                         TransducerLogger.LogFmt("Abort garbage: offset={0} awaited={1} state={2}", offset, _awaitedsize, _state);
+
+                                        try { ProtocolFileLogger.WriteProtocol("SYS", "Abort garbage: offset=" + offset + " awaited=" + _awaitedsize, null); } catch { }
+
                                         break;
                                     }
                                     else
@@ -2101,6 +2156,8 @@ namespace Transducers
                                                 if (iTrashing < Int32.MaxValue)
                                                     iTrashing++;
                                                 TransducerLogger.Log("only trash in buffer - giving up");
+                                                try { ProtocolFileLogger.WriteProtocol("SYS", "only trash in buffer - giving up", null); } catch { }
+
                                                 break;
                                             }
                                         }
@@ -2161,11 +2218,15 @@ namespace Transducers
                                                 {
                                                     Debug.Print("wrong crc. waiting:" + makeCRC(s));
                                                     TransducerLogger.Log("PARSER: wrong CRC, will wait for more data");
+                                                    try { ProtocolFileLogger.WriteProtocol("SYS", "PARSER wrong CRC, will wait", Encoding.UTF8.GetBytes(s)); } catch { }
+
                                                 }
                                             }
                                             catch (Exception ex)
                                             {
                                                 TransducerLogger.LogException(ex, "PARSER CRC check exception");
+                                                try { ProtocolFileLogger.WriteProtocol("SYS", "PARSER CRC check exception: " + ex.Message, null); } catch { }
+
                                             }
                                         }
                                         if (!bValidCmd)
@@ -2184,6 +2245,7 @@ namespace Transducers
                                 {
                                     Debug.Print("TIMEOUT PARSING");
                                     TransducerLogger.Log("TIMEOUT PARSING");
+                                    try { ProtocolFileLogger.WriteProtocol("SYS", "TIMEOUT PARSING", null); } catch { }
                                     break;
                                 }
                             }
@@ -2202,6 +2264,18 @@ namespace Transducers
                                         signalmeasure.lticktx.Add(System.Environment.TickCount - signalmeasure.iTickTX);
                                     }
                                     TransducerLogger.LogFmt("RX INVALID COMMAND: bytes={0}", offset);
+
+                                    // log invalid raw
+                                    try
+                                    {
+                                        byte[] rawInv = new byte[offset];
+                                        Array.Copy(bs, 0, rawInv, 0, offset);
+                                        ProtocolFileLogger.WriteProtocol("RX", "INVALID_COMMAND bytes=" + offset, rawInv);
+                                    }
+                                    catch { }
+
+
+
                                 }
                             }
                             else
@@ -2226,6 +2300,7 @@ namespace Transducers
 
                                         Write2Log("dummy SA");
                                         TransducerLogger.Log("Injected dummy SA response");
+                                        try { ProtocolFileLogger.WriteProtocol("RX", "Injected dummy SA response", bs); } catch { }
                                     }
                                     if (
                                         _state == eState.eWaitingAquisitionAdditionalConfig &&
@@ -2239,6 +2314,8 @@ namespace Transducers
 
                                         Write2Log("dummy SB");
                                         TransducerLogger.Log("Injected dummy SB response");
+                                        try { ProtocolFileLogger.WriteProtocol("RX", "Injected dummy SB response", bs); } catch { }
+
                                     }
                                     if (
                                         _state == eState.eWaitingAquisitionAdditional2Config &&
@@ -2252,6 +2329,8 @@ namespace Transducers
 
                                         Write2Log("dummy SC");
                                         TransducerLogger.Log("Injected dummy SC response");
+                                        try { ProtocolFileLogger.WriteProtocol("RX", "Injected dummy SC response", bs); } catch { }
+
                                     }
 
                                 }
@@ -2285,6 +2364,30 @@ namespace Transducers
                                     catch { }
                                     Write2Log("<-" + "rx [ERR] " + System.Environment.TickCount + " :" + s + " " + (errtran == 3 ? "INVALID COMMAND" : ""));
                                     TransducerLogger.LogFmt("RX [ERR] {0} errtype={1}", s, errtran);
+
+
+                                    // também gravar raw do pacote ERR no log de protocolo
+                                    try
+                                    {
+                                        int lenErr = bspend - bspini + 1;
+                                        if (lenErr > 0)
+                                        {
+                                            byte[] rawErr = new byte[lenErr];
+                                            Array.Copy(bs, bspini, rawErr, 0, lenErr);
+                                            ProtocolFileLogger.WriteProtocol("RX", s, rawErr);
+                                        }
+                                        else
+                                        {
+                                            ProtocolFileLogger.WriteProtocol("RX", s, null);
+                                        }
+                                    }
+                                    catch { }
+
+
+
+
+
+
 
 
                                     if (errtran == 3 && iConsecErrs > 1)
@@ -2380,6 +2483,27 @@ namespace Transducers
 
                                         Write2Log("<-" + "rx " + System.Environment.TickCount + " :" + LastPackage);
                                         TransducerLogger.LogFmt("RX package stored LastPackage len={0}", LastPackage?.Length ?? 0);
+
+                                        // gravação completa (texto + raw bytes) no arquivo de protocolo por sessão
+                                        try
+                                        {
+                                            int len = (bspend - bspini + 1);
+                                            if (len > 0)
+                                            {
+                                                byte[] raw = new byte[len];
+                                                Array.Copy(bs, bspini, raw, 0, len);
+                                                ProtocolFileLogger.WriteProtocol("RX", LastPackage, raw);
+                                            }
+                                            else
+                                            {
+                                                ProtocolFileLogger.WriteProtocol("RX", LastPackage, null);
+                                            }
+                                        }
+                                        catch { }
+
+
+
+
                                     }
 
                                     lock (locker_State)
@@ -3085,6 +3209,8 @@ namespace Transducers
 
                             TransducerLogger.LogException(err, "serialPort_DataReceived catch (unknown)");
                             Write2Log("data catch (unknown) " + err.Message + " " + (err.InnerException != null ? err.InnerException.Message : "") + " " + System.Environment.TickCount, true);
+                            try { ProtocolFileLogger.WriteProtocol("SYS", "data catch (unknown) " + err.Message, null); } catch { }
+
 
                         }
                     }
@@ -3094,11 +3220,14 @@ namespace Transducers
             {
                 TransducerLogger.LogException(ex, "serialPort_DataReceived outer catch");
                 Write2Log("RX err " + ex.Message, true);
+                try { ProtocolFileLogger.WriteProtocol("SYS", "RX err " + ex.Message, null); } catch { }
+
             }
             finally
             {
                 Write2Log("RX out", true);
                 TransducerLogger.Log("serialPort_DataReceived: exit");
+                try { ProtocolFileLogger.WriteProtocol("SYS", "serialPort_DataReceived exit", null); } catch { }
             }
         
         
@@ -3156,6 +3285,8 @@ namespace Transducers
             Debug.Print("----- PHOENIX START SERVICE -------");
             TransducerLogger.Log("StartService called");
             bUserStartService = true;
+            try { ProtocolFileLogger.WriteProtocol("SYS", "StartService called", null); } catch { }
+
             lock (signalmeasure.lmeasure)
             {
                 try
@@ -3186,6 +3317,8 @@ namespace Transducers
                 {
                     Write2Log("ClosePort", true);
                     TransducerLogger.Log("ClosePort called");
+                    try { ProtocolFileLogger.WriteProtocol("SYS", "ClosePort called", null); } catch { }
+
                     {
 
                         Debug.Print("%%%%%%%%%%%%% SP.RTS %%%%%%%%%%%%%%%%%%");
@@ -3206,10 +3339,14 @@ namespace Transducers
                         Debug.Print("%%%%%%%%%%%%% SP.CLOSE %%%%%%%%%%%%%%%%%%");
 
                         Write2Log("close", true);
+                        try { ProtocolFileLogger.WriteProtocol("SYS", "ClosePort close", null); } catch { }
+
 
                         sp.Close();
 
                         Write2Log("closed", true);
+                        try { ProtocolFileLogger.WriteProtocol("SYS", "ClosePort closed", null); } catch { }
+
 
                         Debug.Print("%%%%%%%%%%%%% SP.CLOSED %%%%%%%%%%%%%%%%%%");
                         Thread.Sleep(300);
@@ -3237,6 +3374,8 @@ namespace Transducers
                     }
                 }
                 catch { }
+                try { ProtocolFileLogger.WriteProtocol("SYS", "ClosePort exception: " + ex.Message, null); } catch { }
+
             }
             bClosing = false;
         }
@@ -3287,6 +3426,9 @@ namespace Transducers
                     Debug.Print("%%%%%%%%%%%%% StartService connected %%%%%%%%%%%%%%%%%% " + System.Environment.TickCount);
 
                     TransducerLogger.LogFmt("ETH CONNECTED: {0}:{1}", _Eth_IP, _Eth_Port);
+                    try { ProtocolFileLogger.WriteProtocol("SYS", $"ETH CONNECTED: {_Eth_IP}:{_Eth_Port}", null); } catch { }
+
+
 
                     Debug.Print("%%%%%%%%%%%%% StartService GetStream %%%%%%%%%%%%%%%%%% " + System.Environment.TickCount);
 
@@ -3305,10 +3447,27 @@ namespace Transducers
                                 string message = System.Text.Encoding.ASCII.GetString(data, 0, bytes);
                                 Debug.Print("------ DISCARDED: " + bytes + " " + message);
                                 TransducerLogger.LogFmt("StartService_Eth: discarded initial bytes={0} msg='{1}'", bytes, message);
+
+
+                                try
+                                {
+                                    byte[] rawDiscard = new byte[bytes];
+                                    Array.Copy(data, 0, rawDiscard, 0, bytes);
+                                    ProtocolFileLogger.WriteProtocol("RX", "StartService_Eth discarded initial bytes", rawDiscard);
+                                }
+                                catch { }
+
+
+
+
+
+
                             }
                         }
                     }
-                    catch (Exception ex) { TransducerLogger.LogException(ex, "StartService_Eth discard read"); }
+                    //catch (Exception ex) { TransducerLogger.LogException(ex, "StartService_Eth discard read"); }
+                    catch (Exception ex) { TransducerLogger.LogException(ex, "StartService_Eth discard read"); try { ProtocolFileLogger.WriteProtocol("SYS", "StartService_Eth discard read exception: " + ex.Message, null); } catch { } }
+
 
                     bcon = true;
 
@@ -3383,6 +3542,10 @@ namespace Transducers
 
                                 Debug.Print("%%%%%%%%%%%%% PORT OPENED %%%%%%%%%%%%%%%%%% " + System.Environment.TickCount);
                                 TransducerLogger.LogFmt("SERIAL OPEN: {0} baud:{1}", SerialPort.PortName, SerialPort.BaudRate);
+
+                                try { ProtocolFileLogger.WriteProtocol("SYS", $"SERIAL OPEN: {SerialPort.PortName} baud:{SerialPort.BaudRate}", null); } catch { }
+
+
                                 bcon = true;
                                 if (i > 0)
                                     Debug.Print("loop works");
@@ -3459,6 +3622,9 @@ namespace Transducers
 
                 Write2Log("Open " + SerialPort.PortName + " " + SerialPort.BaudRate + " " + System.Environment.TickCount);
 
+                try { ProtocolFileLogger.WriteProtocol("SYS", "ChangeBaudRate: " + SerialPort.BaudRate, null); } catch { }
+
+
 
                 SerialPort.RtsEnable = true;
 
@@ -3468,13 +3634,17 @@ namespace Transducers
                 TransducerLogger.LogFmt("ChangeBaudRate: set baud {0} on port {1}", SerialPort.BaudRate, SerialPort.PortName);
 
             }
-            catch (Exception ex) { TransducerLogger.LogException(ex, "ChangeBaudRate exception"); }
+            //catch (Exception ex) { TransducerLogger.LogException(ex, "ChangeBaudRate exception"); }
+            catch (Exception ex) { TransducerLogger.LogException(ex, "ChangeBaudRate exception"); try { ProtocolFileLogger.WriteProtocol("SYS", "ChangeBaudRate exception: " + ex.Message, null); } catch { } }
+
         }
         private void ClearNeeds()
         {
             flags = new sFlags();
             Write2Log("clear needs");
             TransducerLogger.Log("ClearNeeds called - flags cleared");
+            try { ProtocolFileLogger.WriteProtocol("SYS", "clear needs", null); } catch { }
+
 
 
         }
@@ -3486,6 +3656,8 @@ namespace Transducers
 
             Write2Log("stop service " + System.Environment.TickCount);
             TransducerLogger.Log("StopService called");
+            try { ProtocolFileLogger.WriteProtocol("SYS", "StopService called", null); } catch { }
+
 
             enableraiseerrors = false;
 
@@ -3498,6 +3670,9 @@ namespace Transducers
                 Debug.Print("%%%%%%%%%%%%% StopService %%%%%%%%%%%%%%%%%%");
                 Write2Log("internal stop service " + System.Environment.TickCount);
                 TransducerLogger.Log("Internal_StopService called");
+                try { ProtocolFileLogger.WriteProtocol("SYS", "Internal_StopService called", null); } catch { }
+
+
 
                 try
                 {
@@ -3545,8 +3720,13 @@ namespace Transducers
                 shutdown = true;
                 DisposeTimer();
                 TransducerLogger.Log("Dispose called - cleaned up resources");
+                try { ProtocolFileLogger.WriteProtocol("SYS", "Dispose called", null); } catch { }
+
+
             }
-            catch (Exception ex) { TransducerLogger.LogException(ex, "Dispose exception"); }
+            //catch (Exception ex) { TransducerLogger.LogException(ex, "Dispose exception"); }
+            catch (Exception ex) { TransducerLogger.LogException(ex, "Dispose exception"); try { ProtocolFileLogger.WriteProtocol("SYS", "Dispose exception: " + ex.Message, null); } catch { } }
+
         }
         public void StartCalibration()
         {
@@ -3555,6 +3735,9 @@ namespace Transducers
 
                 flags.MustSendReadData = true;
                 TransducerLogger.Log("StartCalibration called - MustSendReadData set true");
+                try { ProtocolFileLogger.WriteProtocol("SYS", "StartCalibration called", null); } catch { }
+
+
             }
             catch (Exception err)
             {
@@ -3571,6 +3754,8 @@ namespace Transducers
                 flags.MustSendReadData = true;
                 flags.CaptureNewTightening = true;
                 TransducerLogger.Log("StartReadData called - MustSendReadData & CaptureNewTightening true");
+                try { ProtocolFileLogger.WriteProtocol("SYS", "StartReadData called", null); } catch { }
+
             }
             catch (Exception err)
             {
@@ -3595,6 +3780,8 @@ namespace Transducers
                 flags.MustSendAquisitionAdditional2Config = false;
 
                 TransducerLogger.Log("StopReadData called - acquisition flags cleared");
+                try { ProtocolFileLogger.WriteProtocol("SYS", "StopReadData called", null); } catch { }
+
             }
             catch (Exception err)
             {
@@ -3610,6 +3797,9 @@ namespace Transducers
                 flags.MustSendZeroTorque = true;
                 System.Threading.Thread.Sleep(10);
                 TransducerLogger.Log("SetZeroTorque called - MustSendZeroTorque true");
+                try { ProtocolFileLogger.WriteProtocol("SYS", "SetZeroTorque called", null); } catch { }
+
+
             }
             catch (Exception err)
             {
@@ -3624,6 +3814,9 @@ namespace Transducers
                 flags.MustSendZeroAngle = true;
                 System.Threading.Thread.Sleep(10);
                 TransducerLogger.Log("SetZeroAngle called - MustSendZeroAngle true");
+                try { ProtocolFileLogger.WriteProtocol("SYS", "SetZeroAngle called", null); } catch { }
+
+
             }
             catch (Exception err)
             {
@@ -3639,6 +3832,9 @@ namespace Transducers
                 flags.TorqueOffset = torqueoffset;
                 System.Threading.Thread.Sleep(10);
                 TransducerLogger.LogFmt("SetTorqueOffset called - torqueoffset={0}", torqueoffset);
+                try { ProtocolFileLogger.WriteProtocol("SYS", "SetTorqueOffset called: " + torqueoffset, null); } catch { }
+
+
             }
             catch (Exception err)
             {
@@ -3681,6 +3877,13 @@ namespace Transducers
             AquisitionConfig.TimeToIgnoreNewPeak_AfterFinalThreshold_ms = TimeToIgnoreNewPeak_AfterFinalThreshold_ms;
 
             TransducerLogger.LogFmt("SetTestParameter called: Threshold={0} ThresholdEnd={1} TimeStep_ms={2} FilterFreq={3}", Threshold, ThresholdEnd, TimeStep_ms, FilterFrequency);
+            try { ProtocolFileLogger.WriteProtocol("SYS", $"SetTestParameter: Threshold={Threshold} ThresholdEnd={ThresholdEnd} TimeStep_ms={TimeStep_ms} FilterFreq={FilterFrequency} direction={direction} " +
+            $"TorqueTarget={TorqueTarget} TorqueMin={TorqueMin} TorqueMax={TorqueMax} AngleTarget={AngleTarget} " +
+            $"AngleMin={AngleMin} AngleMax={AngleMax} DelayToDetectFirstPeak_ms={DelayToDetectFirstPeak_ms} " +
+            $"TimeToIgnoreNewPeak_AfterFinalThreshold_ms={TimeToIgnoreNewPeak_AfterFinalThreshold_ms}", null); } 
+            catch { }
+
+
         }
 
         public void SetTestParameter_ClickWrench(ushort FallPercentage, ushort RisePercentage, ushort MinTimeBetweenPulses_ms)
@@ -3692,6 +3895,9 @@ namespace Transducers
             AquisitionClickWrenchConfig.MinTimeBetweenPulses_ms = MinTimeBetweenPulses_ms;
 
             TransducerLogger.LogFmt("SetTestParameter_ClickWrench called: Fall={0} Rise={1} MinTime_ms={2}", FallPercentage, RisePercentage, MinTimeBetweenPulses_ms);
+            try { ProtocolFileLogger.WriteProtocol("SYS", $"SetTestParameter_ClickWrench: Fall={FallPercentage} Rise={RisePercentage} MinTime_ms={MinTimeBetweenPulses_ms}", null); } catch { }
+
+
         }
 
 
@@ -3705,6 +3911,9 @@ namespace Transducers
                 flags.Calibrate_AppliedAngle = AppliedAngle;
                 flags.Calibrate_CurrentAngle = CurrentAngle;
                 TransducerLogger.LogFmt("Calibrate called: AppliedTorque={0} CurrentTorque={1} AppliedAngle={2} CurrentAngle={3}", AppliedTorque, CurrentTorque, AppliedAngle, CurrentAngle);
+                try { ProtocolFileLogger.WriteProtocol("SYS", $"Calibrate called: AppliedTorque={AppliedTorque}", null); } catch { }
+
+
             }
             catch (Exception err)
             {
@@ -3732,6 +3941,9 @@ namespace Transducers
                 flags.MustSendGetCounters = true;
 
                 TransducerLogger.Log("StartCommunication called - MustSendGetID & MustSendGetCounters true");
+                try { ProtocolFileLogger.WriteProtocol("SYS", "StartCommunication called", null); } catch { }
+
+
             }
             catch (Exception err)
             {
