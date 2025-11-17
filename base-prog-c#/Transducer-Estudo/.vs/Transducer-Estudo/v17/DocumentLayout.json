@@ -3,15 +3,18 @@
   "WorkspaceRootPath": "C:\\M\\transducerapp\\base-prog-c#\\Transducer-Estudo\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{74A38E66-66A3-4CA6-AFE6-C373E97FD3AB}|..\\ITransducers\\ITransducers.csproj|c:\\m\\transducerapp\\base-prog-c#\\itransducers\\countersinformation.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{C8081169-7044-40B7-A32C-C9BBF07F0DFB}|Transducer-Estudo\\Transducer-Estudo.csproj|c:\\m\\transducerapp\\base-prog-c#\\transducer-estudo\\transducer-estudo\\form1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{C8081169-7044-40B7-A32C-C9BBF07F0DFB}|Transducer-Estudo\\Transducer-Estudo.csproj|solutionrelative:transducer-estudo\\form1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{C8081169-7044-40B7-A32C-C9BBF07F0DFB}|Transducer-Estudo\\Transducer-Estudo.csproj|C:\\M\\transducerapp\\base-prog-c#\\Transducer-Estudo\\transducer-estudo\\form1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
-      "RelativeMoniker": "D:0:0:{C8081169-7044-40B7-A32C-C9BBF07F0DFB}|Transducer-Estudo\\Transducer-Estudo.csproj|solutionrelative:transducer-estudo\\form1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
+      "AbsoluteMoniker": "D:0:0:{95133AC1-F5A1-447C-919C-82DB4A16D9BD}|..\\Transducers\\Transducers.csproj|c:\\m\\transducerapp\\base-prog-c#\\transducers\\phoenixtransducer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{95133AC1-F5A1-447C-919C-82DB4A16D9BD}|..\\Transducers\\Transducers.csproj|c:\\m\\transducerapp\\base-prog-c#\\transducers\\phoenixtransducer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{C8081169-7044-40B7-A32C-C9BBF07F0DFB}|Transducer-Estudo\\Transducer-Estudo.csproj|C:\\M\\transducerapp\\base-prog-c#\\Transducer-Estudo\\transducer-estudo\\form1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{C8081169-7044-40B7-A32C-C9BBF07F0DFB}|Transducer-Estudo\\Transducer-Estudo.csproj|solutionrelative:transducer-estudo\\form1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
     },
     {
       "AbsoluteMoniker": "D:0:0:{74A38E66-66A3-4CA6-AFE6-C373E97FD3AB}|..\\ITransducers\\ITransducers.csproj|c:\\m\\transducerapp\\base-prog-c#\\itransducers\\itransducer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
@@ -24,9 +27,6 @@
     },
     {
       "AbsoluteMoniker": "D:0:0:{74A38E66-66A3-4CA6-AFE6-C373E97FD3AB}|..\\ITransducers\\ITransducers.csproj|c:\\m\\transducerapp\\base-prog-c#\\itransducers\\debuginformation.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{74A38E66-66A3-4CA6-AFE6-C373E97FD3AB}|..\\ITransducers\\ITransducers.csproj|c:\\m\\transducerapp\\base-prog-c#\\itransducers\\countersinformation.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
   "DocumentGroupContainers": [
@@ -36,7 +36,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 8,
+          "SelectedChildIndex": 6,
           "Children": [
             {
               "$type": "Bookmark",
@@ -48,7 +48,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 5,
+              "DocumentIndex": 6,
               "Title": "DataInformation.cs",
               "DocumentMoniker": "C:\\M\\transducerapp\\base-prog-c#\\ITransducers\\DataInformation.cs",
               "RelativeDocumentMoniker": "..\\ITransducers\\DataInformation.cs",
@@ -60,7 +60,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 4,
               "Title": "ITransducer.cs",
               "DocumentMoniker": "C:\\M\\transducerapp\\base-prog-c#\\ITransducers\\ITransducer.cs",
               "RelativeDocumentMoniker": "..\\ITransducers\\ITransducer.cs",
@@ -72,7 +72,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 6,
+              "DocumentIndex": 7,
               "Title": "DebugInformation.cs",
               "DocumentMoniker": "C:\\M\\transducerapp\\base-prog-c#\\ITransducers\\DebugInformation.cs",
               "RelativeDocumentMoniker": "..\\ITransducers\\DebugInformation.cs",
@@ -84,7 +84,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 4,
+              "DocumentIndex": 5,
               "Title": "DataResult.cs",
               "DocumentMoniker": "C:\\M\\transducerapp\\base-prog-c#\\ITransducers\\DataResult.cs",
               "RelativeDocumentMoniker": "..\\ITransducers\\DataResult.cs",
@@ -96,15 +96,16 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 7,
+              "DocumentIndex": 0,
               "Title": "CountersInformation.cs",
               "DocumentMoniker": "C:\\M\\transducerapp\\base-prog-c#\\ITransducers\\CountersInformation.cs",
               "RelativeDocumentMoniker": "..\\ITransducers\\CountersInformation.cs",
               "ToolTip": "C:\\M\\transducerapp\\base-prog-c#\\ITransducers\\CountersInformation.cs",
               "RelativeToolTip": "..\\ITransducers\\CountersInformation.cs",
-              "ViewState": "AgIAAAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAAAoAAAAAAAAAAAAgwB4AAAABAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-17T10:49:23.353Z"
+              "WhenOpened": "2025-11-17T10:49:23.353Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -114,33 +115,35 @@
               "RelativeDocumentMoniker": "..\\Transducers\\PhoenixTransducer.cs",
               "ToolTip": "C:\\M\\transducerapp\\base-prog-c#\\Transducers\\PhoenixTransducer.cs",
               "RelativeToolTip": "..\\Transducers\\PhoenixTransducer.cs",
-              "ViewState": "AgIAAI4BAAAAAAAAAAAswP0NAACcAAAAAAAAAA==",
+              "ViewState": "AgIAAFQPAAAAAAAAAAAIwHIPAAABAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-11-13T14:57:30.086Z"
+              "WhenOpened": "2025-11-13T14:57:30.086Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 1,
               "Title": "Form1.cs",
               "DocumentMoniker": "C:\\M\\transducerapp\\base-prog-c#\\Transducer-Estudo\\Transducer-Estudo\\Form1.cs",
               "RelativeDocumentMoniker": "Transducer-Estudo\\Form1.cs",
               "ToolTip": "C:\\M\\transducerapp\\base-prog-c#\\Transducer-Estudo\\Transducer-Estudo\\Form1.cs",
               "RelativeToolTip": "Transducer-Estudo\\Form1.cs",
-              "ViewState": "AgIAAMUAAAAAAAAAAAAwwOIAAAAJAAAAAAAAAA==",
+              "ViewState": "AgIAAOEBAAAAAAAAAAAwwP8BAAABAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2025-07-18T17:51:21.989Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 3,
               "Title": "Form1.cs [Design]",
               "DocumentMoniker": "C:\\M\\transducerapp\\base-prog-c#\\Transducer-Estudo\\Transducer-Estudo\\Form1.cs",
               "RelativeDocumentMoniker": "Transducer-Estudo\\Form1.cs",
               "ToolTip": "C:\\M\\transducerapp\\base-prog-c#\\Transducer-Estudo\\Transducer-Estudo\\Form1.cs [Design]",
               "RelativeToolTip": "Transducer-Estudo\\Form1.cs [Design]",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-04-16T18:52:44.219Z"
+              "WhenOpened": "2025-04-16T18:52:44.219Z",
+              "EditorCaption": " [Design]"
             }
           ]
         }

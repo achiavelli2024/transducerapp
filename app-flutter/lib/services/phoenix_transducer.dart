@@ -8,7 +8,8 @@
 //  - Mantive e documentei a lógica de limpeza de _awaitedSize após receber o pacote esperado.
 //  - Adicionei helper _indexOfSequence para localizar sequências de bytes (usado no parser GD).
 //  - Comentários abundantes para aprendizado, conforme pedido.
-// OBS: não removi nada que já funcionava (DI/DS/TQ/RC parsing etc). Foco apenas em robustez GD/awaitedSize/CRC.
+//  - Alinhamento com C#: adição de _KA() e ajuste do setTestParameterShort para usar defaults do C#.
+// OBS: não removi nada que já funcionava (DI/DS/TQ/RC parsing etc). Foco apenas em robustez GD/awaitedSize/CRC e small fixes.
 // IMPORTANTE: Este arquivo depende de ../models/data_information.dart e transducer_logger.dart no projeto.
 
 import 'dart:async';
@@ -551,14 +552,16 @@ class PhoenixTransducer {
       double nominalTorque,
       double threshold,
       ) {
+    // Alterado para replicar exatamente o overload curto do C#:
+    // ThresholdEnd = Threshold / 2 ; TimeoutEnd_ms = 10
     return setTestParameter(
       info,
       type,
       toolType,
       nominalTorque,
       threshold,
-      thresholdEnd: 0,
-      timeoutEndMs: 1,
+      thresholdEnd: threshold / 2.0,
+      timeoutEndMs: 10,
       timeStepMs: 1,
       filterFrequency: 500,
       direction: eDirection.CW,
@@ -1660,48 +1663,6 @@ class PhoenixTransducer {
 
   // ----------------------------
   // CRC helpers
-  String _makeCRC(String cmd) {
-    StringBuffer bitString = StringBuffer();
-    for (int i = 0; i < cmd.length; i++) {
-      int c = cmd.codeUnitAt(i);
-      int k = 128;
-      for (int j = 0; j < 8; j++) {
-        if ((c & k) == 0) bitString.write('0');
-        else bitString.write('1');
-        k = k >> 1;
-      }
-    }
-
-    List<int> CRC = List<int>.filled(8, 0);
-
-    String bits = bitString.toString();
-    for (int i = 0; i < bits.length; i++) {
-      int DoInvert = (bits[i] == '1') ? (CRC[7] ^ 1) : CRC[7];
-      int newCRC7 = CRC[6];
-      int newCRC6 = CRC[5];
-      int newCRC5 = CRC[4] ^ DoInvert;
-      int newCRC4 = CRC[3];
-      int newCRC3 = CRC[2];
-      int newCRC2 = CRC[1] ^ DoInvert;
-      int newCRC1 = CRC[0];
-      int newCRC0 = DoInvert;
-      CRC[7] = newCRC7;
-      CRC[6] = newCRC6;
-      CRC[5] = newCRC5;
-      CRC[4] = newCRC4;
-      CRC[3] = newCRC3;
-      CRC[2] = newCRC2;
-      CRC[1] = newCRC1;
-      CRC[0] = newCRC0;
-    }
-
-    int res0 = CRC[4] + CRC[5] * 2 + CRC[6] * 4 + CRC[7] * 8 + '0'.codeUnitAt(0);
-    int res1 = CRC[0] + CRC[1] * 2 + CRC[2] * 4 + CRC[3] * 8 + '0'.codeUnitAt(0);
-    if (res0 > '9'.codeUnitAt(0)) res0 += ('A'.codeUnitAt(0) - '9'.codeUnitAt(0) - 1);
-    if (res1 > '9'.codeUnitAt(0)) res1 += ('A'.codeUnitAt(0) - '9'.codeUnitAt(0) - 1);
-    return String.fromCharCode(res0) + String.fromCharCode(res1);
-  }
-
   String _makeCRCFromBytes(List<int> payloadBytes) {
     final sb = StringBuffer();
     for (var c in payloadBytes) {
@@ -1756,6 +1717,8 @@ class PhoenixTransducer {
 
   Future<void> dispose() async {
     _userInitiatedStop = true;
-    await _internalStopService();
+    try {
+      await _internalStopService();
+    } catch (_) {}
   }
 }

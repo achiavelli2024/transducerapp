@@ -15,6 +15,8 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+//import '../models/data_information.dart';
+
 
 import '../services/phoenix_transducer.dart';
 import '../services/transducer_logger.dart'; // logger defensivo
