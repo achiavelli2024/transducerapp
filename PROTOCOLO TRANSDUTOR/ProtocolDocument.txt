@@ -1,0 +1,1435 @@
+================================================================================
+DOCUMENTAÇÃO DO PROTOCOLO DE COMUNICAÇÃO DO TRANSDUTOR PHOENIX
+================================================================================
+Versão: 1.0
+Data: 2025-11-18
+Autor: Documentação técnica baseada em análise de firmware e logs
+
+================================================================================
+SUMÁRIO E OBJETIVO DO DOCUMENTO
+================================================================================
+
+Este documento descreve de forma completa e detalhada o protocolo de 
+comunicação serial/ethernet do transdutor Phoenix, utilizado para medição de 
+torque e ângulo. O objetivo é fornecer todas as informações necessárias para 
+implementar um cliente compatível em qualquer linguagem de programação, com 
+foco especial na portabilidade para Dart/Flutter.
+
+O protocolo utiliza comunicação ASCII com frames delimitados por colchetes, 
+identificadores de 12 caracteres, comandos de 2 caracteres, dados variáveis e 
+CRC de 2 caracteres. A comunicação pode ocorrer via Serial (USB/Bluetooth) ou 
+TCP/IP (Telnet porta 23).
+
+================================================================================
+LINHA DO TEMPO - ESTADO DO PROJETO
+================================================================================
+
+ONDE ESTÁVAMOS:
+- Implementação C# funcional no projeto Transducer-Estudo
+- Comunicação TCP/IP estável com dispositivo físico
+- Logs detalhados de frames capturados
+- Protocolo reverse-engineered a partir de comportamento observado
+
+ONDE ESTAMOS:
+- Documentação completa do protocolo em andamento
+- Implementação Flutter parcial com problemas de parsing
+- CRC e estrutura de frames compreendidos
+- Mapeamento de comandos e offsets documentados
+
+PARA ONDE VAMOS:
+- Port completo e funcional para Flutter/Dart
+- Parsing correto de DI, DS, TQ, LS e GD (Get Data blocks)
+- Implementação de state machine compatível com C#
+- Validação 1:1 com comportamento do cliente C#
+- Testes automatizados e checklist de validação
+
+================================================================================
+DESCRIÇÃO DO FRAMING
+================================================================================
+
+ESTRUTURA GERAL DO FRAME:
+[IIIIIIIIIIIICCDDDDD...DDXX]
+
+Onde:
+- "[" (0x5B): Delimitador inicial do frame (1 byte)
+- I (12 chars): ID do dispositivo em ASCII hexadecimal (ex: "00000F311550")
+- C (2 chars): Comando em ASCII (ex: "ID", "DI", "DS", "TQ", "GD", etc)
+- D (variável): Dados do comando em ASCII hexadecimal
+- X (2 chars): CRC em ASCII hexadecimal (2 caracteres)
+- "]" (0x5D): Delimitador final do frame (1 byte)
+
+TAMANHOS MÍNIMOS E MÁXIMOS:
+- Frame mínimo: 18 bytes -> [000000000000ID17] (sem dados)
+- Frame máximo: depende do comando, GD pode ter 18 + (240 blocos * 5 bytes) = 1218 bytes
+
+POSIÇÕES FIXAS NO FRAME (indices baseados em 0):
+- Byte 0: '[' (sempre)
+- Bytes 1-12: Device ID (12 chars)
+- Bytes 13-14: Comando (2 chars)
+- Bytes 15 até (length-3): Dados (variável)
+- Bytes (length-2) até (length-1): CRC (2 chars)
+- Byte length: ']' (sempre)
+
+EXEMPLO REAL DE FRAME DI:
+[00000F311550DI00886   MSRT-75-38                      2.001.310100007521340150C45B000001F40000000029]
+Posição  0: '['
+Posição  1-12: '00000F311550' (Device ID)
+Posição 13-14: 'DI' (comando Device Information)
+Posição 15-96: dados do DI (serial, modelo, hw, fw, tipo, capacidade, fatores conversão)
+Posição 97-98: '29' (CRC)
+Posição 99: ']'
+
+ENCODING:
+- Todo o protocolo usa encoding LATIN1 (ISO-8859-1)
+- NUNCA use UTF-8 para parsing, pois bytes > 127 serão interpretados incorretamente
+- Em Dart: use latin1.decode() e latin1.encode()
+- Em C#: use Encoding.GetEncoding("ISO-8859-1") ou Encoding.Default
+
+================================================================================
+ALGORITMO DE CRC (CRC-8 Customizado)
+================================================================================
+
+O CRC utilizado é um CRC-8 customizado com polinômio 0x07 (x^8 + x^2 + x + 1).
+O algoritmo processa bit a bit a string de entrada (sem delimitadores [ ]).
+
+PSEUDO-CÓDIGO DO ALGORITMO:
+
+function makeCRC(cmd: string) -> string {
+    // 1. Converter a string cmd em sequência de bits (MSB first)
+    BitString = ""
+    for each char c in cmd {
+        for bit_position from 7 down to 0 {
+            if (c & (1 << bit_position)) != 0 {
+                BitString += "1"
+            } else {
+                BitString += "0"
+            }
+        }
+    }
+    
+    // 2. Inicializar registrador CRC com 8 bits zerados
+    CRC[7..0] = [0, 0, 0, 0, 0, 0, 0, 0]
+    
+    // 3. Processar cada bit da entrada
+    for each bit in BitString {
+        if (bit == '1') {
+            DoInvert = CRC[7] XOR 1
+        } else {
+            DoInvert = CRC[7]
+        }
+        
+        // Shift e XOR conforme polinômio 0x07
+        CRC[7] = CRC[6]
+        CRC[6] = CRC[5]
+        CRC[5] = CRC[4] XOR DoInvert
+        CRC[4] = CRC[3]
+        CRC[3] = CRC[2]
+        CRC[2] = CRC[1] XOR DoInvert
+        CRC[1] = CRC[0]
+        CRC[0] = DoInvert
+    }
+    
+    // 4. Converter registrador CRC em 2 caracteres ASCII hex
+    // Nibble alto: CRC[7..4]
+    // Nibble baixo: CRC[3..0]
+    high_nibble = CRC[4] + CRC[5]*2 + CRC[6]*4 + CRC[7]*8
+    low_nibble = CRC[0] + CRC[1]*2 + CRC[2]*4 + CRC[3]*8
+    
+    char1 = (high_nibble < 10) ? ('0' + high_nibble) : ('A' + high_nibble - 10)
+    char2 = (low_nibble < 10) ? ('0' + low_nibble) : ('A' + low_nibble - 10)
+    
+    return char1 + char2
+}
+
+EXEMPLO DE CÁLCULO:
+Input: "00000F311550ID"
+Output CRC: "17"
+Frame completo: [00000F311550ID17]
+
+IMPLEMENTAÇÃO EM DART:
+
+String makeCRC(String cmd) {
+  List<int> crc = List.filled(8, 0);
+  String bitString = "";
+  
+  // Converter string em bits
+  for (int i = 0; i < cmd.length; i++) {
+    int charCode = cmd.codeUnitAt(i);
+    for (int j = 7; j >= 0; j--) {
+      bitString += ((charCode & (1 << j)) != 0) ? "1" : "0";
+    }
+  }
+  
+  // Processar cada bit
+  for (int i = 0; i < bitString.length; i++) {
+    int doInvert = (bitString[i] == '1') ? (crc[7] ^ 1) : crc[7];
+    
+    crc[7] = crc[6];
+    crc[6] = crc[5];
+    crc[5] = crc[4] ^ doInvert;
+    crc[4] = crc[3];
+    crc[3] = crc[2];
+    crc[2] = crc[1] ^ doInvert;
+    crc[1] = crc[0];
+    crc[0] = doInvert;
+  }
+  
+  // Converter para ASCII hex
+  int highNibble = crc[4] + crc[5] * 2 + crc[6] * 4 + crc[7] * 8;
+  int lowNibble = crc[0] + crc[1] * 2 + crc[2] * 4 + crc[3] * 8;
+  
+  String char1 = (highNibble < 10) 
+      ? String.fromCharCode(0x30 + highNibble)
+      : String.fromCharCode(0x41 + highNibble - 10);
+  String char2 = (lowNibble < 10) 
+      ? String.fromCharCode(0x30 + lowNibble)
+      : String.fromCharCode(0x41 + lowNibble - 10);
+  
+  return char1 + char2;
+}
+
+VALIDAÇÃO DE CRC:
+- Ao receber um frame, extrair a porção entre '[' e os últimos 2 chars antes de ']'
+- Calcular CRC dessa porção (ID + CMD + DATA)
+- Comparar com os 2 chars de CRC recebidos
+- Se diferentes, descartar frame (exceto para frames GD com flag DEF_IGNOREGRAPHCRC=true)
+
+
+================================================================================
+LISTA COMPLETA DE COMANDOS
+================================================================================
+
+Os comandos são sempre 2 caracteres ASCII. Abaixo a lista completa com 
+descrição, direção (C->D = Cliente para Dispositivo, D->C = Dispositivo para 
+Cliente) e exemplos reais extraídos dos logs.
+
+--------------------------------------------------------------------------------
+1. ID - Get Device ID
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (response)
+Descrição: Solicita o ID único do dispositivo (12 caracteres hex)
+
+REQUEST:
+Frame: [000000000000IDC1]
+- ID genérico: 000000000000
+- Comando: ID
+- CRC: C1
+
+RESPONSE:
+Frame: [00000F311550ID17]
+- ID do dispositivo: 00000F311550
+- Comando: ID (echo)
+- Dados: (nenhum dado adicional neste caso)
+- CRC: 17
+
+Parsing (Dart):
+String deviceId = framedAscii.substring(1, 13); // "00000F311550"
+
+--------------------------------------------------------------------------------
+2. DI - Device Information
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (response)
+Descrição: Solicita informações do dispositivo (serial, modelo, versões, 
+fatores de conversão)
+
+REQUEST:
+Frame: [00000F311550DICC]
+
+RESPONSE exemplo:
+Frame: [00000F311550DI00886   MSRT-75-38                      2.001.310100007521340150C45B000001F40000000029]
+
+ESTRUTURA DOS DADOS (após posição 15 do frame):
+Offset  Tamanho  Campo                    Exemplo      Descrição
+------  -------  -----------------------  -----------  -------------------------
+0       8        Serial Number            "00886   "   Número de série (padding espaços)
+8       32       Model                    "MSRT-75-38                      " Modelo do dispositivo
+40      4        Hardware Version         "2.00"       Versão HW (formato X.XX)
+44      4        Firmware Version         "1.31"       Versão FW (formato X.XX)
+48      2        Device Type              "01"         01=Torque+Ângulo, 00=Só Torque
+50      6        Capacity (hex)           "000075"     Capacidade (0x000075 = 117)
+56      4        Buffer Size (hex)        "2134"       Tamanho buffer (0x2134 = 8500)
+60      4        Reserved                 "0150"       Reservado
+64      8        Torque Conv Factor (hex) "C45B0000"   Fator conversão torque
+72      8        Angle Conv Factor (hex)  "01F40000"   Fator conversão ângulo
+80      8        Reserved                 "00000000"   Reservado
+
+FÓRMULAS DE CONVERSÃO:
+TorqueConversionFactor = parseInt(data.substring(64, 72), 16) * 0.000000000001
+AngleConversionFactor = parseInt(data.substring(72, 80), 16) * 0.001
+
+EXEMPLO em Dart:
+String framedAscii = "[00000F311550DI00886   MSRT-75-38                      2.001.310100007521340150C45B000001F40000000029]";
+int lppini = 1; // offset para pular '[' inicial
+
+String serialNumber = framedAscii.substring(15 + lppini, 23 + lppini).trim();
+String model = framedAscii.substring(23 + lppini, 55 + lppini).trim();
+String hwVersion = framedAscii.substring(55 + lppini, 59 + lppini);
+String fwVersion = framedAscii.substring(59 + lppini, 63 + lppini);
+String deviceType = framedAscii.substring(63 + lppini, 65 + lppini);
+String capacityHex = framedAscii.substring(65 + lppini, 71 + lppini);
+int capacity = int.parse(capacityHex, radix: 16);
+String bufferSizeHex = framedAscii.substring(71 + lppini, 75 + lppini);
+int bufferSize = int.parse(bufferSizeHex, radix: 16);
+
+String torqueFactorHex = framedAscii.substring(75 + lppini, 83 + lppini);
+double torqueConversionFactor = int.parse(torqueFactorHex, radix: 16) * 0.000000000001;
+
+String angleFactorHex = framedAscii.substring(83 + lppini, 91 + lppini);
+double angleConversionFactor = int.parse(angleFactorHex, radix: 16) * 0.001;
+
+NOTA: lppini = 1 porque framedAscii inclui o '[' inicial. Se você processar 
+apenas a parte interna sem '[', use lppini = 0.
+
+--------------------------------------------------------------------------------
+3. DS - Device Status
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (response)
+Descrição: Solicita status do dispositivo (estado, erro, temperatura, voltagem)
+
+REQUEST:
+Frame: [00000F311550DS91]
+
+RESPONSE exemplo:
+Frame: [00000F311550DSB8000C4E01000101010FAE03E8000300000028000098E097]
+
+ESTRUTURA DOS DADOS (após posição 15):
+Offset  Tamanho  Campo                        Exemplo  Descrição
+------  -------  ---------------------------  -------  --------------------------
+0       2        State                        "B8"     Estado do dispositivo (hex)
+2       2        Error                        "00"     Código de erro (00=nenhum)
+4       4        Temperature (milli °C)       "0C4E"   Temp em mili-celsius
+8       2        Interface                    "01"     Interface ativa (01=TCP)
+10      2        Power Source                 "00"     Fonte alimentação
+12      2        Power State                  "01"     Estado alimentação
+14      2        Analog Power State           "01"     Estado power analógico
+16      2        Encoder Power State          "01"     Estado power encoder
+18      4        Power Voltage (mV)           "0FAE"   Voltagem em milivolts
+22      4        Auto Power OFF Span (s)      "03E8"   Timeout auto-desligar
+26      4        Reset Reason                 "0003"   Motivo do último reset
+30      8        Alive Time (s)               "00000028" Tempo ligado (segundos)
+38      8        Counter/ID                   "000098E0" Contador ou ID adicional
+
+Parsing em Dart:
+int state = int.parse(framedAscii.substring(15 + lppini, 17 + lppini), radix: 16);
+int error = int.parse(framedAscii.substring(17 + lppini, 19 + lppini), radix: 16);
+int tempMc = int.parse(framedAscii.substring(19 + lppini, 23 + lppini), radix: 16);
+double tempCelsius = tempMc / 1000.0;
+
+--------------------------------------------------------------------------------
+4. RC - Read Counters
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (response)
+Descrição: Lê contadores de ciclos, overshoots e outras estatísticas
+
+REQUEST:
+Frame: [00000F311550RC35]
+
+RESPONSE exemplo:
+Frame: [00000F311550RC00000C1700000000000000000000000000000000E1]
+
+ESTRUTURA DOS DADOS:
+Offset  Tamanho  Campo                    Descrição
+------  -------  -----------------------  ------------------------------------
+0       8        Cycles                   Número de ciclos realizados
+8       8        Overshoots               Número de overshoots
+16      8        Higher Overshoot         Maior overshoot registrado
+24      8        Additional Counter 1     Contador adicional 1
+32      8        Additional Counter 2     Contador adicional 2
+
+--------------------------------------------------------------------------------
+5. ZO - Zero (Torque ou Ângulo)
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (response/ack)
+Descrição: Zera o torque ou o ângulo
+
+REQUEST Zerar Torque:
+Frame: [00000F311550ZO0000958600000002B8]
+Dados: 00009586 (torque zero target) + 00000002 (flags, bit 1 = zero torque)
+
+REQUEST Zerar Ângulo:
+Frame: [00000F311550ZO0000958600000000F2]
+Dados: 00009586 (angle zero target) + 00000000 (flags, bit 0 = zero angle)
+
+RESPONSE (ack):
+Frame: [00000F311550ZO0000958600000000F2]
+Mesmos dados, indica que comando foi aceito.
+
+--------------------------------------------------------------------------------
+6. SA - Set Acquisition (Start Acquisition?)
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (ack)
+Descrição: Comando relacionado com início ou preparação de aquisição
+
+REQUEST:
+Frame: [00000F311550SA009E]
+
+RESPONSE:
+Frame: [00000F311550SA009E]
+
+--------------------------------------------------------------------------------
+7. SB - Set B (Configuration?)
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (ack)
+Descrição: Parâmetro de configuração B (usage não totalmente documentado)
+
+REQUEST exemplo:
+Frame: [00000F311550SB...] (dados variam conforme configuração)
+
+--------------------------------------------------------------------------------
+8. SC - Set C (Configuration?)
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (ack)
+Descrição: Parâmetro de configuração C
+
+REQUEST:
+Frame: [00000F311550SC005C]
+
+RESPONSE:
+Frame: [00000F311550SC005C]
+
+--------------------------------------------------------------------------------
+9. CS - Configure Start? / Checksum?
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (ack)
+Descrição: Comando de configuração ou validação
+
+REQUEST:
+Frame: [00000F311550CS00F9]
+
+RESPONSE:
+Frame: [00000F311550CS00F9]
+
+
+--------------------------------------------------------------------------------
+10. ER - Error
+--------------------------------------------------------------------------------
+Direção: D->C (notificação de erro)
+Descrição: Dispositivo envia código de erro
+
+EXEMPLO:
+Frame: [00000F311550ER03C4]
+Dados: "03" = código de erro 0x03
+
+CÓDIGOS DE ERRO OBSERVADOS:
+- ER03: Rejeição de configuração (reject config). Normalmente ocorre quando:
+  * Parâmetros de configuração inválidos
+  * Sequência de comandos incorreta
+  * Dispositivo não está em estado apropriado para receber configuração
+  
+TRATAMENTO:
+- Ao receber ER03 durante InitRead, aguardar e reenviar sequência de 
+  configuração (ZO, SA, CS, SC)
+- Fazer retry com exponential backoff
+- Logar erro para debug
+
+--------------------------------------------------------------------------------
+11. TQ - Torque (Read Current Torque)
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (response)
+Descrição: Lê torque e ângulo instantâneos
+
+REQUEST:
+Frame: [00000F311550TQ5E]
+
+RESPONSE exemplo:
+Frame: [00000F311550TQFFFFFFAD0000000029]
+
+ESTRUTURA DOS DADOS:
+Offset  Tamanho  Campo         Descrição
+------  -------  ------------  ------------------------------------------------
+0       8        Torque (hex)  Valor de torque em formato signed 32-bit hex
+8       8        Angle (hex)   Valor de ângulo em formato signed 32-bit hex
+
+CONVERSÃO:
+int torqueRaw = int.parse(framedAscii.substring(15, 23), radix: 16);
+// Se bit 31 está set (valor >= 0x80000000), é negativo:
+if (torqueRaw >= 0x80000000) {
+  torqueRaw = torqueRaw - 0x100000000; // complemento de 2
+}
+double torqueNm = torqueRaw * torqueConversionFactor;
+
+int angleRaw = int.parse(framedAscii.substring(23, 31), radix: 16);
+if (angleRaw >= 0x80000000) {
+  angleRaw = angleRaw - 0x100000000;
+}
+double angleDegrees = angleRaw * angleConversionFactor;
+
+EXEMPLOS REAIS DOS LOGS:
+[00000F311550TQFFFFFFAD0000000029] -> torque=-83, angle=0
+[00000F311550TQ00000F88000000005A] -> torque=3976, angle=0
+[00000F311550TQFFFFFF7A0000000063] -> torque=-134, angle=0
+[00000F311550TQ00001DCD0000000083] -> torque=7629, angle=0
+
+--------------------------------------------------------------------------------
+12. LS - Last Sample / Load Status
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (response)
+Descrição: Retorna status da última aquisição (tightening finished)
+
+REQUEST:
+Frame: [00000F311550LS85]
+
+RESPONSE exemplo (sem aquisição):
+Frame: [00000F311550LS0000FFFF00000000000000000000000000000000000056]
+
+RESPONSE exemplo (aquisição concluída):
+Frame: [00000F311550LS0300033A033B00E801AA000221820000000000000000D2]
+
+ESTRUTURA DOS DADOS (quando state=03 = Finished):
+Offset  Tamanho  Campo              Exemplo    Descrição
+------  -------  -----------------  ---------  --------------------------------
+0       2        State              "03"       Estado: 00=idle, 01=acquiring, 
+                                               03=finished
+2       2        Direction          "00"       Direção: 00=CW, 01=CCW
+4       4        Size               "033A"     Número de amostras coletadas
+8       4        Peak Index         "033B"     Índice da amostra com pico torque
+12      4        Threshold Index    "00E8"     Índice onde threshold foi atingido
+16      8        Torque Result      "01AA0002" Torque final (signed 32-bit)
+24      8        Angle Result       "21820000" Ângulo final (signed 32-bit)
+32      8        Reserved           "00000000" Reservado
+
+PARSING EM DART:
+int state = int.parse(framedAscii.substring(15, 17), radix: 16);
+if (state == 0x03) { // Finished
+  int direction = int.parse(framedAscii.substring(17, 19), radix: 16);
+  int size = int.parse(framedAscii.substring(19, 23), radix: 16);
+  int peakIndex = int.parse(framedAscii.substring(23, 27), radix: 16);
+  int thresholdIndex = int.parse(framedAscii.substring(27, 31), radix: 16);
+  
+  int torqueResult = int.parse(framedAscii.substring(31, 39), radix: 16);
+  if (torqueResult >= 0x80000000) torqueResult -= 0x100000000;
+  double torqueNm = torqueResult * torqueConversionFactor;
+  
+  int angleResult = int.parse(framedAscii.substring(39, 47), radix: 16);
+  if (angleResult >= 0x80000000) angleResult -= 0x100000000;
+  double angleDeg = angleResult * angleConversionFactor;
+}
+
+--------------------------------------------------------------------------------
+13. GD - Get Data (Get Graph/Chart Block)
+--------------------------------------------------------------------------------
+Direção: C->D (request), D->C (response com dados de amostragem)
+Descrição: Solicita bloco de amostras de torque/ângulo (gráfico)
+
+Este é o comando mais complexo do protocolo, usado para baixar os dados de uma 
+aquisição completa em blocos.
+
+REQUEST:
+Frame: [00000F311550GD + STARTINDEX(4 bytes hex) + BLOCKSIZE(2 bytes hex) + STEP(2 bytes hex) + CRC]
+
+Exemplo: [00000F311550GD0000001E0156]
+- STARTINDEX: 00000000 (começar da amostra 0)
+- BLOCKSIZE: 1E (30 amostras)
+- STEP: 01 (passo 1, todas as amostras)
+
+RESPONSE:
+Frame: [03000F311550GD + BINARY_DATA + CRC]
+
+ATENÇÃO: O frame de resposta GD começa com "03" ao invés de "[00":
+- Posição 0: 0x03 (marcador especial, não é '[')
+- Posição 1-3: "00" (ou outro prefixo)
+- Posição 4-15: Device ID
+- Posição 16-17: "GD"
+- Posição 18+: Dados binários das amostras
+
+ESTRUTURA DOS DADOS GD (BINARY):
+Cada amostra ocupa exatamente 5 bytes:
+- 3 bytes: Torque (signed 24-bit, little endian)
+- 2 bytes: Ângulo (signed 16-bit, little endian)
+
+PARSING DE UMA AMOSTRA (em bytes, não ASCII hex):
+for (int i = 18; i < frameLength - 3; i += 5) {
+  // Ler 3 bytes de torque
+  int torqueByte0 = bytes[i];
+  int torqueByte1 = bytes[i + 1];
+  int torqueByte2 = bytes[i + 2];
+  
+  // Montar torque como 24-bit signed
+  int torqueRaw = (torqueByte0 << 16) | (torqueByte1 << 8) | torqueByte2;
+  
+  // Verificar se é negativo (bit 23 set)
+  if ((torqueByte0 & 0x80) != 0) {
+    // Estender sinal para 32-bit
+    torqueRaw |= 0xFF000000;
+  }
+  
+  // Converter para Nm
+  double torqueNm = torqueRaw * torqueConversionFactor;
+  
+  // Ler 2 bytes de ângulo
+  int angleByte0 = bytes[i + 3];
+  int angleByte1 = bytes[i + 4];
+  
+  // Montar ângulo como 16-bit signed
+  int angleRaw = (angleByte0 << 8) | angleByte1;
+  
+  // Verificar se é negativo (bit 15 set)
+  if ((angleByte0 & 0x80) != 0) {
+    angleRaw = -(0x10000 - angleRaw); // Complemento de 2 para 16-bit
+  }
+  
+  // Converter para graus
+  double angleDeg = angleRaw * angleConversionFactor;
+  
+  // Adicionar à lista de resultados
+  results.add(DataResult(torque: torqueNm, angle: angleDeg));
+}
+
+CÁLCULO DO TAMANHO ESPERADO (awaitedSize):
+awaitedSize = 18 + (blockSize * 5)
+
+Onde:
+- 18 = tamanho do cabeçalho ("[03" + ID(12) + "GD"(2) + CRC(2) + "]")
+- blockSize = número de amostras solicitadas
+- 5 = bytes por amostra (3 torque + 2 ângulo)
+
+LIMITES:
+- DEF_MAX_BLOCKSIZE = 240 amostras por bloco (C# usa 100, mas hardware suporta até 240)
+- DEF_MAX_GRAPHSIZE = 1200 amostras totais no gráfico (C# usa 2000, depende da memória)
+
+EXEMPLO COMPLETO:
+Se LS retornou size=826 amostras e você quer coletar com step=1:
+- Número de blocos = ceil(826 / 100) = 9 blocos
+- Bloco 0: startIndex=0, blockSize=100, step=1
+- Bloco 1: startIndex=100, blockSize=100, step=1
+- ...
+- Bloco 8: startIndex=800, blockSize=26, step=1
+
+ATENÇÃO ESPECIAL - FRAGMENTAÇÃO:
+Frames GD podem chegar fragmentados via TCP. O código C# usa uma estratégia de 
+buffer acumulativo:
+1. Ao enviar GD request, calcular awaitedSize e armazená-lo
+2. Acumular bytes recebidos em buffer
+3. Só processar quando buffer.length >= awaitedSize
+4. Procurar por delimitadores '[' ou marcador '03'
+
+EXEMPLO DART PARA LIDAR COM FRAGMENTAÇÃO:
+List<int> _receiveBuffer = [];
+int _awaitedSize = 0;
+
+void sendGDRequest(int startIndex, int blockSize, int step) {
+  _awaitedSize = 18 + (blockSize * 5);
+  String cmd = deviceId + "GD" + 
+               startIndex.toRadixString(16).padLeft(8, '0').toUpperCase() +
+               blockSize.toRadixString(16).padLeft(2, '0').toUpperCase() +
+               step.toRadixString(16).padLeft(2, '0').toUpperCase();
+  String frame = "[" + cmd + makeCRC(cmd) + "]";
+  socket.write(latin1.encode(frame));
+}
+
+void onSocketData(List<int> chunk) {
+  _receiveBuffer.addAll(chunk);
+  
+  if (_awaitedSize > 0 && _receiveBuffer.length >= _awaitedSize) {
+    // Frame completo recebido
+    List<int> frameBytes = _receiveBuffer.sublist(0, _awaitedSize);
+    _receiveBuffer.removeRange(0, _awaitedSize);
+    _awaitedSize = 0;
+    
+    parseGDFrame(frameBytes);
+  }
+}
+
+
+================================================================================
+STATE MACHINE E FLUXO DE INICIALIZAÇÃO
+================================================================================
+
+O cliente C# implementa uma state machine complexa para gerenciar a comunicação.
+A seguir, a sequência InitRead completa e os estados necessários.
+
+ESTADOS PRINCIPAIS:
+- eIdle: Ocioso, sem comunicação ativa
+- eMustSendGetID / eWaitingID: Obtenção do ID do dispositivo
+- eMustSendRequestInformation / eWaitAnswerRequestInformation: Obter DI
+- eMustSendGetCounters / eWaitingCounters: Obter contadores RC
+- eMustSendZeroTorque / eWaitingZeroTorque: Zerar torque
+- eMustSendZeroAngle / eWaitingZeroAngle: Zerar ângulo
+- eMustConfigure / eWaitingConfigure: Configurar parâmetros (SA, SB, SC, CS)
+- eMustSendReadCommand / eWaitingAnswerReadCommand: Polling de TQ
+- eMustSendGetStatus / eWaitingGetStatus: Verificar status LS
+- eMustSendGetChartBlock / eWaitingChartBlock: Baixar blocos GD
+
+SEQUÊNCIA InitRead (INICIALIZAÇÃO COMPLETA):
+
+1. Conectar socket TCP ao dispositivo (IP:porta, ex: 192.168.4.1:23)
+
+2. Enviar ID request:
+   TX: [000000000000IDC1]
+   RX: [00000F311550ID17]
+   -> Armazenar deviceId = "00000F311550"
+
+3. Enviar DI request:
+   TX: [00000F311550DICC]
+   RX: [00000F311550DI00886   MSRT-75-38    ...29]
+   -> Parsear e armazenar: serialNumber, model, hwVersion, fwVersion, 
+      deviceType, capacity, bufferSize, torqueConversionFactor, 
+      angleConversionFactor
+
+4. Enviar RC request (contadores):
+   TX: [00000F311550RC35]
+   RX: [00000F311550RC00000C17...E1]
+   -> Parsear contadores (cycles, overshoots, etc)
+
+5. Enviar DS request (device status):
+   TX: [00000F311550DS91]
+   RX: [00000F311550DSB8000C4E...97]
+   -> Verificar estado e erros
+
+6. Zerar Torque:
+   TX: [00000F311550ZO0000958600000002B8]
+   RX: [00000F311550ZO0000958600000002B8]
+   -> Aguardar ack. Se receber ER03, aguardar e tentar novamente
+
+7. Configurar SA (Set Acquisition):
+   TX: [00000F311550SA009E]
+   RX: [00000F311550SA009E]
+
+8. Configurar CS:
+   TX: [00000F311550CS00F9]
+   RX: [00000F311550CS00F9]
+   -> Se receber ER03, indica rejeição de config. Aguardar e reenviar ZO+SA+CS
+
+9. Configurar SB (se necessário):
+   TX: [00000F311550SB...]
+   RX: [00000F311550SB...]
+
+10. Configurar SC:
+    TX: [00000F311550SC005C]
+    RX: [00000F311550SC005C]
+
+11. Iniciar polling de TQ (Torque):
+    Loop a cada 100-400ms:
+      TX: [00000F311550TQ5E]
+      RX: [00000F311550TQXXXXXXXX...XX]
+      -> Parsear torque e ângulo instantâneos
+      -> Publicar evento DataResult com valores
+
+12. Polling de LS (Last Sample Status):
+    Loop a cada 1200ms enquanto aguarda aquisição:
+      TX: [00000F311550LS85]
+      RX: [00000F311550LS0000FFFF...] (se ainda idle/acquiring)
+      ou
+      RX: [00000F311550LS0300033A...] (se finished)
+    
+    Quando state=0x03 (Finished):
+      -> Parsear size, peakIndex, torqueResult, angleResult
+      -> Calcular número de blocos necessários
+      -> Transitar para aquisição de blocos GD
+
+13. Aquisição de blocos GD:
+    Para cada bloco (i = 0 até numBlocks-1):
+      Calcular startIndex, blockSize, step
+      TX: [00000F311550GD + startIndex(8hex) + blockSize(2hex) + step(2hex) + CRC]
+      RX: [03000F311550GD + BINARY_DATA... + CRC]
+      -> Parsear amostras (torque, ângulo)
+      -> Acumular em lista de resultados
+    
+    Após todos blocos:
+      -> Publicar evento TesteResult com lista completa de DataResult
+      -> Voltar para polling TQ
+
+TIMEOUTS IMPORTANTES (em milissegundos):
+- DEF_TIMESPAN_TIMEOUT_ID = 500
+- DEF_TIMESPAN_TIMEOUT_READ = 400 (para TQ)
+- DEF_TIMESPAN_BETWEENREADS = 100 (intervalo entre TQ requests)
+- DEF_TIMESPAN_TIMEOUT_REQUESTINFORMATION = 500 (para DI)
+- DEF_TIMESPAN_AQUISITIONCONFIG = 200 (para SA, SB, SC, CS)
+- DEF_TIMESPAN_GETSTATUS = 1200 (para LS)
+- DEF_TIMESPAN_WAITCHARTBLOCK = 500 (para cada bloco GD)
+- DEF_TIMESPAN_TIMEOUT_ZERO = 300 (para ZO)
+- DEF_TIMESPAN_TIMEOUT_CONFIGURATION = 500
+- DEF_TIMESPAN_TIMEOUT_COUNTERS = 300 (para RC)
+
+TRATAMENTO DE TIMEOUT:
+Se não receber resposta dentro do timeout:
+- Incrementar contador de erros consecutivos
+- Se erros < DEF_MAX_ERRS (60), reenviar comando
+- Se erros >= DEF_MAX_ERRS, desconectar e reportar erro fatal
+
+TRATAMENTO DE ERRO ER03:
+Ao receber [00000F311550ER03C4] durante configuração:
+1. Aguardar 500ms
+2. Reenviar sequência ZO + SA + CS + SC
+3. Se persistir por 3 tentativas, reportar erro ao usuário
+
+================================================================================
+TRATAMENTO DE FRAGMENTAÇÃO E POLÍTICAS DE BUFFER
+================================================================================
+
+PROBLEMA:
+TCP pode entregar dados em chunks de tamanhos variados. Um frame pode chegar 
+fragmentado em múltiplas chamadas do callback onData.
+
+SOLUÇÃO (baseada no código C#):
+
+1. Manter um buffer de recepção acumulativo (List<int> ou ByteBuffer)
+
+2. Ao enviar um comando que espera resposta de tamanho conhecido (como GD):
+   - Calcular awaitedSize
+   - Armazenar em variável global _awaitedSize
+
+3. No callback onData(chunk):
+   a. Adicionar chunk ao buffer: _receiveBuffer.addAll(chunk)
+   
+   b. Se _awaitedSize > 0 (esperando frame de tamanho específico):
+      - Verificar se _receiveBuffer.length >= _awaitedSize
+      - Se sim, extrair frameBytes = _receiveBuffer.sublist(0, _awaitedSize)
+      - Remover do buffer: _receiveBuffer.removeRange(0, _awaitedSize)
+      - Resetar _awaitedSize = 0
+      - Processar frameBytes
+   
+   c. Senão (frame de tamanho variável):
+      - Procurar delimitador '[' no buffer
+      - Procurar delimitador ']' correspondente
+      - Se encontrados, extrair frame completo
+      - Validar CRC
+      - Processar frame
+      - Remover do buffer
+
+PSEUDO-CÓDIGO DART:
+
+class PhoenixTransducer {
+  List<int> _receiveBuffer = [];
+  int _awaitedSize = 0;
+  String _deviceId = "000000000000";
+  
+  void onSocketData(List<int> chunk) {
+    _receiveBuffer.addAll(chunk);
+    
+    while (_receiveBuffer.isNotEmpty) {
+      if (_awaitedSize > 0) {
+        // Esperando frame de tamanho específico (ex: GD)
+        if (_receiveBuffer.length >= _awaitedSize) {
+          List<int> frameBytes = _receiveBuffer.sublist(0, _awaitedSize);
+          _receiveBuffer.removeRange(0, _awaitedSize);
+          int savedAwaitedSize = _awaitedSize;
+          _awaitedSize = 0;
+          
+          _processFrame(frameBytes, savedAwaitedSize);
+        } else {
+          // Aguardar mais dados
+          break;
+        }
+      } else {
+        // Frame de tamanho variável
+        int startIndex = _findFrameStart();
+        if (startIndex == -1) {
+          // Nenhum '[' encontrado, descartar buffer
+          _receiveBuffer.clear();
+          break;
+        }
+        
+        if (startIndex > 0) {
+          // Descartar lixo antes do '['
+          _receiveBuffer.removeRange(0, startIndex);
+        }
+        
+        int endIndex = _findFrameEnd();
+        if (endIndex == -1) {
+          // ']' não encontrado ainda, aguardar mais dados
+          break;
+        }
+        
+        // Frame completo encontrado
+        List<int> frameBytes = _receiveBuffer.sublist(0, endIndex + 1);
+        _receiveBuffer.removeRange(0, endIndex + 1);
+        
+        _processFrame(frameBytes, 0);
+      }
+    }
+  }
+  
+  int _findFrameStart() {
+    for (int i = 0; i < _receiveBuffer.length; i++) {
+      if (_receiveBuffer[i] == 0x5B || _receiveBuffer[i] == 0x03) {
+        return i;
+      }
+    }
+    return -1;
+  }
+  
+  int _findFrameEnd() {
+    for (int i = 0; i < _receiveBuffer.length; i++) {
+      if (_receiveBuffer[i] == 0x5D) {
+        return i;
+      }
+    }
+    return -1;
+  }
+  
+  void _processFrame(List<int> frameBytes, int expectedSize) {
+    String framedAscii = latin1.decode(frameBytes);
+    
+    // Extrair ID, comando e dados
+    if (framedAscii.startsWith('[') || framedAscii.startsWith('\x03')) {
+      int offset = framedAscii.startsWith('[') ? 1 : 4;
+      String deviceId = framedAscii.substring(offset, offset + 12);
+      String command = framedAscii.substring(offset + 12, offset + 14);
+      
+      // Validar CRC (exceto para GD se DEF_IGNOREGRAPHCRC=true)
+      String dataPlusCrc = framedAscii.substring(offset, framedAscii.length - 1);
+      String dataOnly = dataPlusCrc.substring(0, dataPlusCrc.length - 2);
+      String crcReceived = dataPlusCrc.substring(dataPlusCrc.length - 2);
+      String crcCalculated = makeCRC(dataOnly);
+      
+      bool ignoreGdCrc = (command == "GD" && expectedSize > 0);
+      if (crcReceived != crcCalculated && !ignoreGdCrc) {
+        print("CRC mismatch: received=$crcReceived calculated=$crcCalculated");
+        return; // Descartar frame
+      }
+      
+      // Processar comando
+      _handleCommand(command, framedAscii, frameBytes);
+    }
+  }
+  
+  void _handleCommand(String command, String framedAscii, List<int> frameBytes) {
+    switch (command) {
+      case "ID":
+        _handleID(framedAscii);
+        break;
+      case "DI":
+        _handleDI(framedAscii);
+        break;
+      case "DS":
+        _handleDS(framedAscii);
+        break;
+      case "TQ":
+        _handleTQ(framedAscii);
+        break;
+      case "LS":
+        _handleLS(framedAscii);
+        break;
+      case "GD":
+        _handleGD(frameBytes);
+        break;
+      case "ER":
+        _handleError(framedAscii);
+        break;
+      // ... outros comandos
+    }
+  }
+}
+
+
+================================================================================
+ERROS E CÓDIGOS ER CONHECIDOS
+================================================================================
+
+CÓDIGOS DE ERRO OBSERVADOS NOS LOGS:
+
+1. ER03 - Reject Configuration
+   Descrição: Dispositivo rejeitou parâmetros de configuração
+   Contexto: Ocorre durante sequência ZO, SA, CS, SC
+   Causas possíveis:
+   - Parâmetros inválidos enviados
+   - Dispositivo não está em estado apropriado
+   - Sequência de comandos incorreta
+   - Timeout interno do dispositivo
+   
+   Tratamento recomendado:
+   - Aguardar 500ms
+   - Reenviar sequência completa: ZO + SA + CS + SC
+   - Se persistir após 3 tentativas, reportar erro ao usuário
+   - Verificar logs para identificar comando problemático
+
+2. Outros códigos ER não documentados:
+   Qualquer código ER diferente de 03 deve ser logado e reportado.
+   Formato do frame: [DEVICE_IDER + CODIGO_HEX + CRC]
+   Exemplo: [00000F311550ER05XX] -> código 05
+
+RECOMENDAÇÕES GERAIS PARA TRATAMENTO DE ERROS:
+- Sempre logar frames ER recebidos com timestamp
+- Manter contador de erros consecutivos
+- Implementar exponential backoff para retry
+- Após DEF_MAX_ERRS (60) erros consecutivos, desconectar e reportar falha
+- Resetar contador de erros ao receber qualquer frame válido
+
+================================================================================
+RECOMENDAÇÕES PARA PORTING FLUTTER/DART
+================================================================================
+
+1. ENCODING:
+   - SEMPRE usar latin1 (ISO-8859-1) para decode/encode
+   - NUNCA usar utf8, pois bytes > 127 serão interpretados incorretamente
+   
+   Dart:
+   import 'dart:convert';
+   String text = latin1.decode(bytes);
+   List<int> bytes = latin1.encode(text);
+
+2. PARSING DE FRAMES:
+   - Usar substring com índices exatos conforme documentado
+   - lppini = 1 quando framedAscii inclui '[', lppini = 0 caso contrário
+   - Sempre validar tamanho do frame antes de fazer substring
+
+3. CONVERSÕES NUMÉRICAS:
+   - Usar int.parse(hexString, radix: 16) para hex->int
+   - Implementar tratamento de signed integers (complemento de 2)
+   - Aplicar fatores de conversão obtidos do DI
+
+4. STATE MACHINE:
+   - Implementar enum para estados (equivalente ao eState do C#)
+   - Usar variável de estado global protegida
+   - Implementar timeouts usando Timer do Dart
+   - Manter flags para cada tipo de operação pendente
+
+5. BUFFER DE RECEPÇÃO:
+   - Usar List<int> para buffer acumulativo
+   - Implementar lógica de awaitedSize para frames GD
+   - Procurar delimitadores '[' e ']' para frames normais
+   - Validar CRC antes de processar
+
+6. LOGGING E DEBUG:
+   - Implementar hexdump para visualizar bytes recebidos
+   - Logar todos TX e RX com timestamp
+   - Incluir awaitedSize nos logs
+   - Logar estados da state machine
+   
+   Exemplo hexdump Dart:
+   String hexDump(List<int> bytes) {
+     StringBuffer sb = StringBuffer();
+     for (int i = 0; i < bytes.length; i += 16) {
+       sb.write(i.toRadixString(16).padLeft(8, '0') + '  ');
+       for (int j = 0; j < 16 && i + j < bytes.length; j++) {
+         sb.write(bytes[i + j].toRadixString(16).padLeft(2, '0') + ' ');
+       }
+       sb.write('\n');
+     }
+     return sb.toString();
+   }
+
+7. LIMITES E CONSTANTES:
+   const int DEF_MAX_BLOCKSIZE = 100; // ou 240 se hardware suportar
+   const int DEF_MAX_GRAPHSIZE = 2000; // ou 1200
+   const int DEF_MAX_ERRS = 60;
+   const int DEF_TIMESPAN_TIMEOUT_READ = 400;
+   const int DEF_TIMESPAN_BETWEENREADS = 100;
+   const int DEF_TIMESPAN_GETSTATUS = 1200;
+   const bool DEF_IGNOREGRAPHCRC = true; // Ignorar CRC em frames GD
+
+8. EXEMPLO COMPLETO DE PARSING DI EM DART:
+
+void _handleDI(String framedAscii) {
+  // framedAscii = "[00000F311550DI00886   MSRT-75-38...29]"
+  int lppini = 1; // offset para pular '['
+  
+  try {
+    String serialNumber = framedAscii.substring(15 + lppini, 23 + lppini).trim();
+    String model = framedAscii.substring(23 + lppini, 55 + lppini).trim();
+    String hwVersion = framedAscii.substring(55 + lppini, 59 + lppini);
+    String fwVersion = framedAscii.substring(59 + lppini, 63 + lppini);
+    String deviceType = framedAscii.substring(63 + lppini, 65 + lppini);
+    
+    int capacity = int.parse(framedAscii.substring(65 + lppini, 71 + lppini), radix: 16);
+    int bufferSize = int.parse(framedAscii.substring(71 + lppini, 75 + lppini), radix: 16);
+    
+    String torqueFactorHex = framedAscii.substring(75 + lppini, 83 + lppini);
+    double torqueConversionFactor = int.parse(torqueFactorHex, radix: 16) * 0.000000000001;
+    
+    String angleFactorHex = framedAscii.substring(83 + lppini, 91 + lppini);
+    double angleConversionFactor = int.parse(angleFactorHex, radix: 16) * 0.001;
+    
+    // Armazenar em estado global
+    _deviceInfo = DeviceInformation(
+      serialNumber: serialNumber,
+      model: model,
+      hardwareVersion: hwVersion,
+      firmwareVersion: fwVersion,
+      deviceType: deviceType,
+      capacity: capacity,
+      bufferSize: bufferSize,
+      torqueConversionFactor: torqueConversionFactor,
+      angleConversionFactor: angleConversionFactor,
+    );
+    
+    // Disparar evento
+    if (onDataInformation != null) {
+      onDataInformation!(_deviceInfo);
+    }
+    
+    print("DI parsed: SN=$serialNumber Model=$model HW=$hwVersion FW=$fwVersion");
+    print("  TorqueConvFactor=$torqueConversionFactor AngleConvFactor=$angleConversionFactor");
+    
+  } catch (e) {
+    print("Error parsing DI: $e");
+  }
+}
+
+9. EXEMPLO DE PARSING GD EM DART:
+
+void _handleGD(List<int> frameBytes) {
+  // frameBytes pode começar com 0x03 ao invés de '['
+  int dataStart = (frameBytes[0] == 0x5B) ? 18 : 21; // ajustar offset
+  int dataEnd = frameBytes.length - 3; // -2 para CRC, -1 para ']'
+  
+  List<DataResult> samples = [];
+  
+  for (int i = dataStart; i < dataEnd; i += 5) {
+    if (i + 4 >= dataEnd) break; // Verificar limites
+    
+    // 3 bytes de torque (signed 24-bit)
+    int torqueByte0 = frameBytes[i];
+    int torqueByte1 = frameBytes[i + 1];
+    int torqueByte2 = frameBytes[i + 2];
+    
+    int torqueRaw = (torqueByte0 << 16) | (torqueByte1 << 8) | torqueByte2;
+    
+    // Estender sinal se negativo
+    if ((torqueByte0 & 0x80) != 0) {
+      torqueRaw |= 0xFF000000; // em Dart precisa fazer: torqueRaw = torqueRaw.toSigned(32)
+      // ou: torqueRaw = torqueRaw - 0x1000000 (se não tiver toSigned)
+    }
+    
+    // Converter para Nm
+    double torqueNm = torqueRaw * _torqueConversionFactor;
+    
+    // 2 bytes de ângulo (signed 16-bit)
+    int angleByte0 = frameBytes[i + 3];
+    int angleByte1 = frameBytes[i + 4];
+    
+    int angleRaw = (angleByte0 << 8) | angleByte1;
+    
+    // Estender sinal se negativo
+    if ((angleByte0 & 0x80) != 0) {
+      angleRaw = -(0x10000 - angleRaw);
+    }
+    
+    // Converter para graus
+    double angleDeg = angleRaw * _angleConversionFactor;
+    
+    samples.add(DataResult(torque: torqueNm, angle: angleDeg));
+  }
+  
+  print("GD block parsed: ${samples.length} samples");
+  
+  // Adicionar à lista acumulada
+  _allSamples.addAll(samples);
+  
+  // Verificar se todos blocos foram recebidos
+  _blockIndex++;
+  if (_blockIndex >= _totalBlocks) {
+    // Aquisição completa
+    if (onTesteResult != null) {
+      onTesteResult!(_allSamples);
+    }
+    _allSamples.clear();
+    _blockIndex = 0;
+  }
+}
+
+================================================================================
+TESTES RECOMENDADOS E CHECKLIST DE VALIDAÇÃO
+================================================================================
+
+Para garantir compatibilidade 1:1 com o cliente C#, siga este checklist:
+
+FASE 1 - TESTES UNITÁRIOS:
+[ ] Implementar e testar função makeCRC()
+    - Input: "00000F311550ID" -> Output: "17"
+    - Input: "00000F311550DI" -> Output: "CC"
+    - Input: "00000F311550TQ" -> Output: "5E"
+    
+[ ] Testar parsing de frames DI
+    - Frame completo do log -> extrair todos campos corretamente
+    - Validar conversão de fatores: hex -> double
+    
+[ ] Testar parsing de frames TQ
+    - Valores positivos e negativos
+    - Conversão com fatores de conversão
+    
+[ ] Testar parsing de frames LS
+    - State=00 (idle), State=01 (acquiring), State=03 (finished)
+    
+[ ] Testar parsing de frames GD
+    - 1 amostra, 10 amostras, 100 amostras
+    - Valores positivos e negativos de torque e ângulo
+    - Validar resultado com dados conhecidos
+
+FASE 2 - TESTES DE INTEGRAÇÃO:
+[ ] Conectar ao dispositivo real e obter ID
+    - Enviar [000000000000IDC1]
+    - Receber e parsear resposta
+    - Validar que ID é de 12 caracteres hex
+    
+[ ] Executar sequência InitRead completa
+    - ID -> DI -> RC -> DS -> ZO -> SA -> CS -> SC
+    - Validar que todos comandos são ack'ed
+    - Verificar tratamento de ER03 se ocorrer
+    
+[ ] Polling de TQ
+    - Enviar TQ a cada 100ms por 10 segundos
+    - Validar que todos frames recebidos são válidos
+    - Comparar valores com cliente C# rodando em paralelo
+    
+[ ] Aquisição de gráfico completo
+    - Executar tightening no dispositivo
+    - Aguardar LS state=03
+    - Baixar todos blocos GD
+    - Validar número de amostras == size do LS
+    - Comparar gráfico com cliente C#
+
+FASE 3 - TESTES DE STRESS:
+[ ] Teste de reconnect
+    - Desconectar e reconectar 100 vezes
+    - Validar que InitRead sempre funciona
+    
+[ ] Teste de fragmentação
+    - Simular recepção de frames GD em chunks pequenos (10 bytes por vez)
+    - Validar que parser acumula e processa corretamente
+    
+[ ] Teste de lixo no buffer
+    - Enviar bytes aleatórios antes de frames válidos
+    - Validar que parser encontra '[' e descarta lixo
+    
+[ ] Teste de timeout
+    - Desligar dispositivo durante comunicação
+    - Validar que timeouts são detectados
+    - Validar que erros são reportados corretamente
+
+FASE 4 - VALIDAÇÃO COMPORTAMENTAL:
+[ ] Comparar side-by-side com C#
+    - Conectar ambos clientes ao mesmo dispositivo (alternar)
+    - Capturar logs de ambos
+    - Validar que frames TX e RX são idênticos
+    - Validar que valores de torque/ângulo são idênticos (±0.001)
+    
+[ ] Teste de longa duração
+    - Deixar rodando por 24 horas
+    - Validar que não há memory leak
+    - Validar que não há degradação de performance
+
+CHECKLIST DE VALIDAÇÃO FINAL:
+[ ] CRC calculado corretamente em 100% dos casos
+[ ] Parsing de DI extrai todos campos corretamente
+[ ] Parsing de DS extrai todos campos corretamente
+[ ] Parsing de TQ converte valores corretamente (positivos e negativos)
+[ ] Parsing de LS detecta state finished e extrai resultados
+[ ] Parsing de GD processa múltiplos blocos corretamente
+[ ] Fragmentação de frames é tratada corretamente
+[ ] Timeouts são detectados e tratados
+[ ] ER03 é tratado com retry
+[ ] State machine segue mesma sequência do C#
+[ ] Valores numéricos batem com C# (±0.1%)
+[ ] Nenhum crash ou exception durante uso normal
+[ ] Logs são suficientemente detalhados para debug
+
+================================================================================
+HISTÓRICO E REFERÊNCIAS
+================================================================================
+
+VERSÕES DO DOCUMENTO:
+v1.0 (2025-11-18): Versão inicial completa baseada em análise de código C# e logs
+
+ARQUIVOS DE FIRMWARE UTILIZADOS COMO REFERÊNCIA:
+1. /PHOENIX_TRANSDUCER/PROTOCOL/ProtocoloTransdutor.xlsx
+   Commit: (base do repositório)
+   Descrição: Especificações originais do protocolo em formato Excel
+
+2. /PHOENIX_TRANSDUCER/PROTOCOL/Protocolo_comunicação_transdutor.xlsx
+   Commit: (base do repositório)
+   Descrição: Documentação de comunicação com detalhes de comandos
+
+3. /PHOENIX_TRANSDUCER/PROTOCOL/Protocolo_Transdutor.docx
+   Commit: (base do repositório)
+   Descrição: Documento Word com especificações do protocolo
+
+4. /base-prog-c#/Transducers/PhoenixTransducer.cs
+   Commit: (base do repositório)
+   Linhas relevantes:
+   - 502-553: Implementação do CRC (função makeCRC)
+   - 2811-2916: Parsing de DI (Device Information)
+   - 2552-2592: Parsing de DS (Device Status)
+   - 2710-2750: Parsing de TQ (Torque)
+   - 2600-2703: Parsing de LS (Last Sample)
+   - 3038-3185: Parsing de GD (Get Data blocks)
+   - 830-1050: State machine e sequência de comandos
+
+5. /PHOENIX_TRANSDUCER/run.bat
+   Commit: (base do repositório)
+   Descrição: Script de build e conversão hex2bin do firmware
+
+LOGS UTILIZADOS COMO FONTE DE FRAMES REAIS:
+1. /PROTOCOLO TRANSDUTOR/[00000F311550ID17][00000F311550DI00.txt
+   Descrição: Captura de sessão completa com frames ID, DI, RC, DS, ZO, SA, CS, 
+              SC, TQ, LS e GD
+
+2. /PROTOCOLO TRANSDUTOR/Telnet C# -Tansdutor.txt
+   Descrição: Log de sessão do cliente C# com frames anotados
+
+3. /PROTOCOLO TRANSDUTOR/Telnet Flutter - Transdutor.txt
+   Descrição: Log de tentativa de cliente Flutter (com problemas)
+
+4. /PROTOCOLO TRANSDUTOR/Log_Telnet_17.11.25.txt
+   Descrição: Log detalhado de 25/11 com múltiplas aquisições e blocos GD
+
+5. /PROTOCOLO TRANSDUTOR/Log FLutter 17.11.txt
+   Descrição: Log do Flutter com hex dumps e timestamps
+
+CÓDIGO FLUTTER/DART DE REFERÊNCIA:
+1. /app-flutter/lib/services/phoenix_transducer.dart (se existir)
+   Descrição: Implementação parcial do protocolo em Dart
+
+2. /app-flutter/lib/pages/connect_page.dart (se existir)
+   Descrição: Interface de conexão e controle
+
+IMAGENS E DIAGRAMAS:
+- Layout de frame mencionado no problema statement (não incluído neste arquivo 
+  texto, mas deve estar disponível no contexto do chat)
+
+================================================================================
+PRÓXIMOS PASSOS PARA PORTING
+================================================================================
+
+ORDEM RECOMENDADA DE IMPLEMENTAÇÃO:
+
+1. FUNDAÇÃO (1-2 dias):
+   a. Criar classe PhoenixTransducer em Dart
+   b. Implementar função makeCRC() e validar com unit tests
+   c. Implementar enum de estados (eState)
+   d. Criar estruturas de dados: DeviceInformation, DataResult, etc
+   e. Implementar logging com hexdump
+
+2. COMUNICAÇÃO BÁSICA (2-3 dias):
+   a. Implementar conexão TCP/IP (Socket)
+   b. Implementar buffer de recepção (_receiveBuffer)
+   c. Implementar lógica de fragmentação (awaitedSize)
+   d. Implementar procura de delimitadores '[' e ']'
+   e. Implementar validação de CRC
+
+3. COMANDOS SIMPLES (2-3 dias):
+   a. Implementar envio e parsing de ID
+   b. Implementar envio e parsing de DI
+   c. Implementar envio e parsing de RC
+   d. Implementar envio e parsing de DS
+   e. Implementar envio e parsing de ZO, SA, CS, SC
+   f. Validar com dispositivo real
+
+4. COMANDOS DE LEITURA (3-4 dias):
+   a. Implementar polling de TQ
+   b. Implementar polling de LS
+   c. Implementar eventos/callbacks para publicar dados
+   d. Implementar tratamento de ER03
+   e. Validar valores com cliente C# rodando em paralelo
+
+5. AQUISIÇÃO DE GRÁFICOS (4-5 dias):
+   a. Implementar cálculo de blocos GD (startIndex, blockSize, step)
+   b. Implementar envio de requests GD com awaitedSize
+   c. Implementar parsing de blocos GD binários
+   d. Implementar acumulação de amostras
+   e. Implementar publicação de TesteResult completo
+   f. Validar gráfico completo com C#
+
+6. STATE MACHINE (3-4 dias):
+   a. Implementar estados e transições
+   b. Implementar flags (MustSendXXX)
+   c. Implementar timeouts para cada estado
+   d. Implementar retry logic
+   e. Implementar contador de erros consecutivos
+   f. Validar sequência completa InitRead
+
+7. REFINAMENTO E TESTES (5-7 dias):
+   a. Implementar todos unit tests do checklist
+   b. Implementar testes de integração
+   c. Implementar testes de stress
+   d. Comparação lado-a-lado com C#
+   e. Correção de bugs encontrados
+   f. Documentação de código
+
+TOTAL ESTIMADO: 20-28 dias de trabalho
+
+CONSTANTES IMPORTANTES A DEFINIR:
+class PhoenixTransducerConstants {
+  static const int DEF_MAX_BLOCKSIZE = 100;
+  static const int DEF_MAX_GRAPHSIZE = 2000;
+  static const int DEF_MAX_ERRS = 60;
+  static const int DEF_TIMESPAN_TIMEOUT_ID = 500;
+  static const int DEF_TIMESPAN_TIMEOUT_READ = 400;
+  static const int DEF_TIMESPAN_BETWEENREADS = 100;
+  static const int DEF_TIMESPAN_BETWEENREADS_TRACING = 100;
+  static const int DEF_TIMESPAN_TIMEOUT_REQUESTINFORMATION = 500;
+  static const int DEF_TIMESPAN_AQUISITIONCONFIG = 200;
+  static const int DEF_TIMESPAN_GETSTATUS = 1200;
+  static const int DEF_TIMESPAN_WAITCHARTBLOCK = 500;
+  static const int DEF_TIMESPAN_TIMEOUT_ZERO = 300;
+  static const int DEF_TIMESPAN_TIMEOUT_CONFIGURATION = 500;
+  static const bool DEF_IGNOREGRAPHCRC = true;
+}
+
+FUNÇÕES PRINCIPAIS A IMPLEMENTAR EM phoenix_transducer.dart:
+- String makeCRC(String cmd)
+- void connect(String ip, int port)
+- void disconnect()
+- void startCommunication()
+- void sendCommand(String command, {int? awaitedSize})
+- void _onSocketData(List<int> chunk)
+- void _processFrame(List<int> frameBytes, int expectedSize)
+- void _handleCommand(String command, String framedAscii, List<int> frameBytes)
+- void _handleID(String framedAscii)
+- void _handleDI(String framedAscii)
+- void _handleDS(String framedAscii)
+- void _handleTQ(String framedAscii)
+- void _handleLS(String framedAscii)
+- void _handleGD(List<int> frameBytes)
+- void _handleError(String framedAscii)
+- void _setState(TransducerState newState)
+- void _startTimer()
+- void _onTimerTick()
+- void requestInformation()
+- void zeroTorque()
+- void zeroAngle()
+- void startReadData()
+
+EVENTOS/CALLBACKS A DEFINIR:
+typedef void DataInformationCallback(DeviceInformation info);
+typedef void DataResultCallback(DataResult result);
+typedef void TesteResultCallback(List<DataResult> results);
+typedef void ErrorCallback(int errorCode);
+typedef void StateChangedCallback(TransducerState state);
+
+ESTRUTURAS DE DADOS:
+class DeviceInformation {
+  final String serialNumber;
+  final String model;
+  final String hardwareVersion;
+  final String firmwareVersion;
+  final String deviceType;
+  final int capacity;
+  final int bufferSize;
+  final double torqueConversionFactor;
+  final double angleConversionFactor;
+}
+
+class DataResult {
+  final double torque;
+  final double angle;
+  final int sampleTime;
+  final String type; // "TV" (torque-value), "FR" (final-result)
+}
+
+enum TransducerState {
+  idle,
+  mustSendGetID,
+  waitingID,
+  mustSendRequestInformation,
+  waitAnswerRequestInformation,
+  mustSendReadCommand,
+  waitingAnswerReadCommand,
+  mustSendGetStatus,
+  waitingGetStatus,
+  mustSendGetChartBlock,
+  waitingChartBlock,
+  // ... outros estados
+}
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================
+
+Para questões, dúvidas ou sugestões de melhorias nesta documentação, por favor 
+documente no histórico de versões e mantenha este arquivo atualizado conforme 
+o protocolo evolui.
+
+Data da última atualização: 2025-11-18
+Versão: 1.0
