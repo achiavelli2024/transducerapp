@@ -513,6 +513,7 @@ class PhoenixTransducer {
         int delayToDetectFirstPeakMs = 0,
         int timeToIgnoreNewPeakAfterFinalThresholdMs = 0,
       }) async {
+    // Armazena os parâmetros internamente (mantendo o comportamento existente)
     acquisitionToolType = toolType;
     acquisitionThreshold = threshold;
     acquisitionThresholdEnd = thresholdEnd;
@@ -533,16 +534,46 @@ class PhoenixTransducer {
     acquisitionDelayToDetectFirstPeak_ms = delayToDetectFirstPeakMs;
     acquisitionTimeToIgnoreNewPeakAfterFinalThreshold_ms = timeToIgnoreNewPeakAfterFinalThresholdMs;
 
+    // Sinaliza ao dispatcher que deve enviar SA / SB / SC
     mustSendAquisitionConfig = true;
     mustSendAquisitionAdditionalConfig = true;
     mustSendAquisitionAdditional2Config = true;
 
+    // Se foi passado DataInformation opcional, apenas logamos (como antes)
     if (info != null) {
       TransducerLogger.log('setTestParameter received DataInformation (not required to build SA/SB here)');
     }
 
-    TransducerLogger.logFmt('setTestParameter stored: TesteType={0} NominalTorque={1} Threshold={2} torqueTarget={3} angleTarget={4}',
-        [type.toString(), nominalTorque, threshold, torqueTarget, angleTarget]);
+    // LOG DETALHADO: grava todos os parâmetros recebidos para inspeção
+    // Isto não altera nenhum comportamento, apenas fornece visibilidade completa.
+    try {
+      TransducerLogger.logFmt(
+        'setTestParameter stored: TesteType={0} NominalTorque={1} Threshold={2} ThresholdEnd={3} timeoutEndMs={4} timeStepMs={5} filterFreq={6} dir={7} tool={8} torqueTarget={9} torqueMin={10} torqueMax={11} angleTarget={12} angleMin={13} angleMax={14} delayFirstPeakMs={15} ignoreNewPeakMs={16}',
+        [
+          type.toString(),
+          nominalTorque,
+          threshold,
+          thresholdEnd,
+          timeoutEndMs,
+          timeStepMs,
+          filterFrequency,
+          direction.toString(),
+          (toolType.index + 1), // ToolType em C# começa em 1
+          torqueTarget,
+          torqueMin,
+          torqueMax,
+          angleTarget,
+          angleMin,
+          angleMax,
+          delayToDetectFirstPeakMs,
+          timeToIgnoreNewPeakAfterFinalThresholdMs
+        ],
+      );
+    } catch (e, st) {
+      // Nunca deixe o log interromper a execução; apenas registre a exceção
+      TransducerLogger.logException(e, 'setTestParameter logFmt');
+      TransducerLogger.log('stack: $st');
+    }
   }
 
   Future<void> setTestParameterShort(
@@ -971,7 +1002,16 @@ class PhoenixTransducer {
               _limitToHex4(acquisitionFilterFrequency) +
               _limitToHex2(acquisitionDir.index) +
               _limitToHex2((acquisitionToolType.index + 1)); // ToolType starts at 1 in C#
+
+          // antes de _sendCommand(sSA);
+          TransducerLogger.logFmt('Built SA (pre-CRC): {0}', [sSA]);
+          // opcional: mostrar os bytes ASCII (hex) do payload sem CRC
+          TransducerLogger.logFmt('Built SA payload hex (pre-CRC): {0}', [_toHex(latin1.encode(sSA))]);
+
+
           _sendCommand(sSA);
+
+
           break;
         case enumEState.eMustSendAquisitionClickWrenchConfig:
           _state = enumEState.eWaitingAquisitionClickWrenchConfig;
@@ -980,7 +1020,14 @@ class PhoenixTransducer {
               _limitToHex2(clickFall) +
               _limitToHex2(clickRise) +
               _limitToHex2(clickMinTime_ms);
+
+
+
+          TransducerLogger.logFmt('Built CS (pre-CRC): {0}', [sCS]);
+          TransducerLogger.logFmt('Built CS payload hex (pre-CRC): {0}', [_toHex(latin1.encode(sCS))]);
+
           _sendCommand(sCS);
+
           break;
         case enumEState.eMustSendAquisitionAdditionalConfig:
           _state = enumEState.eWaitingAquisitionAdditionalConfig;
@@ -1000,7 +1047,12 @@ class PhoenixTransducer {
             acquisitionTorqueMax,
             acquisitionAngleTarget
           ]);
+
+          TransducerLogger.logFmt('Built SB (pre-CRC): {0}', [sSB]);
+          TransducerLogger.logFmt('Built SB payload hex (pre-CRC): {0}', [_toHex(latin1.encode(sSB))]);
+
           _sendCommand(sSB);
+
           break;
         case enumEState.eMustSendAquisitionAdditional2Config:
           _state = enumEState.eWaitingAquisitionAdditional2Config;
@@ -1009,7 +1061,13 @@ class PhoenixTransducer {
               _limitToHex4(acquisitionDelayToDetectFirstPeak_ms) +
               _limitToHex4(acquisitionTimeToIgnoreNewPeakAfterFinalThreshold_ms) +
               '000000000000000000000000000000000000000000000000';
+
+          TransducerLogger.logFmt('Built SC (pre-CRC): {0}', [sSC]);
+          TransducerLogger.logFmt('Built SC payload hex (pre-CRC): {0}', [_toHex(latin1.encode(sSC))]);
+
           _sendCommand(sSC);
+
+
           break;
         case enumEState.eMustSendGetCounters:
           _state = enumEState.eWaitingCounters;
@@ -1106,7 +1164,11 @@ class PhoenixTransducer {
       TransducerLogger.logException(e, '_sendCommand');
       if (onError != null) onError!(106);
     }
-  }
+  }//_sendCommand
+
+
+
+
 
   // ----------------------------
   // sendAndWait ack used by initRead
@@ -1147,6 +1209,8 @@ class PhoenixTransducer {
   void _onData(Uint8List data) {
     try {
       TransducerLogger.logRxBytes('socket RAW chunk', data, 0, data.length);
+      //TransducerLogger.logRxBytes('SOCKET_CHUNK', data, 0, data.length);
+
     } catch (_) {}
     _rxBuffer.addAll(data);
 
@@ -1538,49 +1602,13 @@ class PhoenixTransducer {
       } else if (_state == enumEState.eWaitingChartBlock) {
         if (com == 'GD') {
           try {
-            // Robust GD parsing:
-            // Find sequence 'GD' in framedBytes (as bytes) so we know where binary payload starts.
-            final int gdIdx = _indexOfSequence(framedBytes, [ 'G'.codeUnitAt(0), 'D'.codeUnitAt(0) ]);
-            int sampleStart = 15; // fallback original behavior
-            if (gdIdx >= 0) {
-              // payload samples begin right after 'GD' in the framed bytes
-              sampleStart = gdIdx + 2;
-            } else {
-              TransducerLogger.log('GD command detected by com==GD but sequence "GD" not found in framedBytes; using fallback sampleStart=15');
-            }
-
-            int end = framedBytes.length - 3; // last two bytes before ']' are CRC ascii
-            for (int i = sampleStart; i <= end - 1; i += 5) {
-              if (i + 4 >= framedBytes.length) break;
-              int b0 = framedBytes[i];
-              int b1 = framedBytes[i + 1];
-              int b2 = framedBytes[i + 2];
-              bool bcomplete = (b0 & 0x80) == 0x80;
-              int iaux = ((b0 << 16) & 0xFF0000) + ((b1 << 8) & 0xFF00) + (b2 & 0xFF);
-              if (bcomplete) {
-                iaux |= (255 << 24);
-              }
-              int b3 = framedBytes[i + 3];
-              int b4 = framedBytes[i + 4];
-              bool b2complete = (b3 & 0x80) == 0x80;
-              int iaux2 = ((b3 << 8) & 0xFF00) + (b4 & 0xFF);
-              if (b2complete) {
-                iaux2 = -(65536 - iaux2);
-              }
-              DataResult res = DataResult();
-              res.Torque = (_truncateTo3Decimals(_adToNm(iaux)));
-              res.Angle = _convertAngleFromBus(iaux2);
-              res.Type = 'TV';
-              res.SampleTime = _testeResultsList.length * acquisitionTimeStep_ms;
-              _testeResultsList.add(res);
-            }
-            if (onTesteResult != null) onTesteResult!(_testeResultsList);
-            _testeResultsList = [];
-            mustSendGetChartBlock = false;
-            _state = enumEState.eMustSendReadCommand;
-            TransducerLogger.log('Parsed GD block and emitted TesteResult');
+            // Delegamos o parsing binário para o helper que opera sobre bytes (evita substring/utf8 issues)
+            _parseGDFromBytes(Uint8List.fromList(framedBytes));
+            // Após parseGDFromBytes, a função já emitiu onTesteResult, limpou _testeResultsList,
+            // atualizou mustSendGetChartBlock e ajustou o estado conforme comportamento C#.
+            // Continue loop.
           } catch (e) {
-            TransducerLogger.logException(e, 'parse GD');
+            TransducerLogger.logException(e, 'parse GD - delegation to _parseGDFromBytes failed');
           }
         }
       }
@@ -1621,6 +1649,103 @@ class PhoenixTransducer {
       if (ok) return i;
     }
     return -1;
+  }
+
+  // ----- NEW: byte-based GD parser -----
+  // Mantenha este método dentro da classe PhoenixTransducer para acessar os helpers e
+  // campos privados (_testeResultsList, acquisitionTimeStep_ms, etc).
+  // Esta função parseia os blocos GD binários (cada amostra = 5 bytes: 3 bytes torque + 2 bytes angle)
+  // e reproduz o comportamento do C#: popula _testeResultsList, chama onTesteResult, limpa lista
+  // e atualiza flags/estado.
+  void _parseGDFromBytes(Uint8List framedBytes) {
+    // framedBytes contém '[', payload ASCII, binary payload, CRC ASCII (2 bytes), ']'
+    try {
+      // Localiza "GD" dentro do frame (framedBytes inclui colchetes e CRC ASCII no final)
+      final int gdIdx = _indexOfSequence(framedBytes, ['G'.codeUnitAt(0), 'D'.codeUnitAt(0)]);
+      if (gdIdx < 0) {
+        TransducerLogger.log('parseGDFromBytes: sequence "GD" not found in framedBytes');
+        return;
+      }
+
+      // início dos samples logo após 'GD'
+      int sampleStart = gdIdx + 2;
+
+      // Excluir CRC ascii (2 bytes) e o ']' final -> last sample byte = framedBytes.length - 3
+      final int endInclusive = framedBytes.length - 3; // índice do último byte de dados
+      if (sampleStart > endInclusive) {
+        TransducerLogger.logFmt('parseGDFromBytes: nothing to parse sampleStart={0} endInclusive={1}', [sampleStart, endInclusive]);
+        return;
+      }
+
+      // Percorre blocos de 5 bytes: [b0 b1 b2 b3 b4] por amostra
+      // b0..b2 -> torque (24 bits) com flag de sinal em bit 7 de b0 (bcomplete)
+      // b3..b4 -> angle (signed 16-bit)
+      int parsedSamples = 0;
+      for (int i = sampleStart; i + 4 <= endInclusive; i += 5) {
+        final int b0 = framedBytes[i] & 0xFF;
+        final int b1 = framedBytes[i + 1] & 0xFF;
+        final int b2 = framedBytes[i + 2] & 0xFF;
+        final int b3 = framedBytes[i + 3] & 0xFF;
+        final int b4 = framedBytes[i + 4] & 0xFF;
+
+        // sinal/tq: bit7 de b0 indica "complete" (negativo)
+        final bool bcomplete = (b0 & 0x80) == 0x80;
+
+        // constrói valor 24-bit (sem o bit de sinal) - igual a lógica do C#
+        int iaux = ((b0 & 0x7F) << 16) | (b1 << 8) | b2;
+
+        if (bcomplete) {
+          // sign-extend para 32 bits como no C# (iaux |= (255 << 24))
+          iaux |= (0xFF << 24);
+          // converte para signed 32-bit
+          iaux = iaux.toSigned(32);
+        }
+
+        // ângulo: 16-bit com sinal
+        int iaux2 = ((b3 << 8) | b4) & 0xFFFF;
+        if ((iaux2 & 0x8000) != 0) {
+          iaux2 = iaux2 - 0x10000; // sign
+        }
+
+        // Conversões e truncamentos usando helpers existentes (mantenha nomes iguais aos do arquivo)
+        final double torque = _truncateTo3Decimals(_adToNm(iaux));
+        final double angle = _convertAngleFromBus(iaux2);
+
+        // Monta DataResult (use a classe DataResult que já existe no projeto)
+        final DataResult dr = DataResult();
+        dr.Torque = torque;
+        dr.Angle = angle;
+        dr.Type = 'TV';
+        dr.SampleTime = _testeResultsList.length * acquisitionTimeStep_ms;
+        _testeResultsList.add(dr);
+
+        // Notifica callback de cada amostra (opcional; C# acumula e emite um pacote)
+        if (onDataResult != null) onDataResult!(dr);
+
+        parsedSamples++;
+      }
+
+      TransducerLogger.logFmt('parseGDFromBytes: parsed {0} samples', [parsedSamples]);
+
+      // Emular comportamento original do C#: emitir TesteResult (lista completa), limpar lista e ajustar flags/estado
+      try {
+        if (onTesteResult != null) {
+          onTesteResult!(_testeResultsList);
+        }
+      } catch (e) {
+        TransducerLogger.logException(e, '_parseGDFromBytes onTesteResult callback');
+      }
+
+      // limpa lista e avança estado similar ao C#
+      _testeResultsList = [];
+      mustSendGetChartBlock = false;
+      // posiciona para ler TQ novamente (C# fazia um eMustSendReadCommand)
+      _state = enumEState.eMustSendReadCommand;
+      TransducerLogger.log('Parsed GD block and emitted TesteResult (via _parseGDFromBytes)');
+    } catch (ex, st) {
+      TransducerLogger.logException(ex, 'parseGDFromBytes');
+      TransducerLogger.log('stack: $st');
+    }
   }
 
   double _adToNm(int ad) {

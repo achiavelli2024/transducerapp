@@ -1,18 +1,3 @@
-// lib/pages/connect_page.dart
-// Versão atualizada: InitRead manual (replica exatamente o comportamento do C#)
-// - Envia ZO, ZO, CS, SA via setters do PhoenixTransducer e NÃO aguarda de forma
-//   bloqueante o ACK de SA (igual ao C# que faz Thread.Sleep(100) e chama StartReadData).
-// - Corrige problemas causados por aguardar ack (ER02) e a consequente falha do initRead().
-// - Mantive comentários abundantes e mensagens para quem está aprendendo Flutter/Dart.
-//
-// Procedimento após substituir o arquivo:
-// flutter clean && flutter pub get && flutter run
-//
-// Observação importante:
-// - NÃO alterei phoenix_transducer.dart (parser/dispatcher): apenas o fluxo de chamada
-//   no connect_page para reproduzir o comportamento do C#.
-// - Se quiser, podemos depois adicionar logs adicionais para comparar TX FRAME hex com o log C#.
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 //import '../models/data_information.dart';
@@ -312,7 +297,7 @@ class _ConnectPageState extends State<ConnectPage> {
         _message = 'Erro InitRead (C#-style): $e';
       });
     }
-  }
+  }//aqui
 
   // Stop acquisition
   void _stopReadSequence() {
@@ -446,23 +431,69 @@ class _ConnectPageState extends State<ConnectPage> {
             ),
           ]),
           const SizedBox(height: 8),
+
+
+
+
+
           // Use Wrap para evitar overflow de botões em telas estreitas
+          // substitua o seu Wrap atual por este (coloque no mesmo lugar)
           Wrap(
             spacing: 8,
             runSpacing: 6,
             children: [
               ElevatedButton(
-                onPressed: _toggleConnection,
+                onPressed: () {
+                  TransducerLogger.log('Botão Conectar/Desconectar pressionado pelo usuário');
+                  _toggleConnection();
+                },
                 child: Text((_status == ConnectionStatus.connected || _status == ConnectionStatus.connecting) ? 'Desconectar' : 'Conectar'),
               ),
               ElevatedButton(
                 onPressed: (_status == ConnectionStatus.connected) ? _requestInfoImmediate : null,
                 child: const Text('Request Info'),
               ),
+
+              // --- BOTÃO INICIAR LEITURA instrumentado com logs ---
               ElevatedButton(
-                onPressed: (_status == ConnectionStatus.connected) ? _initReadSequence : null,
+                // se conectado, habilita o botão; closure async para aguardar _initReadSequence
+                onPressed: (_status == ConnectionStatus.connected)
+                    ? () async {
+                  // 1) log do evento UI (apenas informativo)
+                  TransducerLogger.log('Botão Iniciar Leitura pressionado pelo usuário');
+
+                  // 2) atualizar UI para feedback (opcional)
+                  setState(() {
+                    _message = 'Iniciando sequência InitRead...';
+                  });
+
+                  try {
+                    // 3) chamar a sequência (a própria função faz logs internos também)
+                    await _initReadSequence();
+
+                    // 4) log de sucesso (a função interna também já registra, mas aqui marcamos o retorno)
+                    TransducerLogger.log('InitRead sequence (chamada do botão) concluída/mandada com sucesso');
+
+                    // 5) atualizar UI novamente (opcional)
+                    setState(() {
+                      _message = 'Sequência InitRead enviada';
+                    });
+                  } catch (e, st) {
+                    // 6) log de exceção com contexto
+                    TransducerLogger.logException(e, 'Erro ao executar _initReadSequence (via botão)');
+                    // também registra stack trace no debug log
+                    TransducerLogger.log('StackTrace: $st');
+
+                    setState(() {
+                      _message = 'Erro ao iniciar leitura: $e';
+                    });
+                  }
+                }
+                    : null,
                 child: const Text('Iniciar Leitura'),
               ),
+              // ----------------------------------------------------
+
               ElevatedButton(
                 onPressed: (_status == ConnectionStatus.connected) ? _stopReadSequence : null,
                 child: const Text('Parar Leitura'),
@@ -477,6 +508,10 @@ class _ConnectPageState extends State<ConnectPage> {
               ),
             ],
           ),
+
+
+
+
         ]),
       ),
     );
