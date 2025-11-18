@@ -98,6 +98,7 @@ namespace ITransducers
         void SetZeroTorque();
         void SetZeroAngle();
         void StartCommunication();
+
         
         void SetTorqueOffset(decimal torqueoffset);  
 
@@ -106,6 +107,16 @@ namespace ITransducers
         void SetPerformance(ePCSpeed pcspeed, eCharPoints charpoints);
 
         bool GetMeasures(out int ptim, out int pok, out int perr, out int pgarb, out int iansavg, out bool validbateryinfo, out int batterylevel, out bool charging, out int Interface, out int laststatetimeout, out int laststateerr);
+
+        //void GetInitReadPayloads();
+
+        //void GetInitReadFrames();
+
+        List<Tuple<string, byte[]>> GetInitReadFrames();
+
+        // Opcional: também retornar só os payloads (sem CRC/colchetes) se quiser
+        List<Tuple<string, byte[]>> GetInitReadPayloads();
+
 
     }
 }

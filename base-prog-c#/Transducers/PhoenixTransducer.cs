@@ -552,6 +552,79 @@ namespace Transducers
             return new string(Res);
         }
 
+
+
+        public List<Tuple<string, byte[]>> GetInitReadFrames()
+        {
+            var list = new List<Tuple<string, byte[]>>();
+            try
+            {
+                // 1) ZO (SetZeroTorque)
+                string ztCmd = _id + "ZO" + "1" + "0";
+                string ztFrame = "[" + ztCmd + makeCRC(ztCmd) + "]";
+                list.Add(new Tuple<string, byte[]>(ztFrame, Encoding.UTF8.GetBytes(ztFrame)));
+
+                // 2) ZO0 (SetZeroAngle)
+                string zaCmd = _id + "ZO0" + "1";
+                string zaFrame = "[" + zaCmd + makeCRC(zaCmd) + "]";
+                list.Add(new Tuple<string, byte[]>(zaFrame, Encoding.UTF8.GetBytes(zaFrame)));
+
+                // 3) CS (Click Wrench config)
+                string csCmd = _id + "CS" +
+                               ((int)LimitClickFall(AquisitionClickWrenchConfig.FallPercentage)).ToString("X2") +
+                               ((int)LimitClickRise(AquisitionClickWrenchConfig.RisePercentage)).ToString("X2") +
+                               ((int)LimitClickWidth_ms(AquisitionClickWrenchConfig.MinTimeBetweenPulses_ms)).ToString("X2");
+                string csFrame = "[" + csCmd + makeCRC(csCmd) + "]";
+                list.Add(new Tuple<string, byte[]>(csFrame, Encoding.UTF8.GetBytes(csFrame)));
+
+                // 4) SA (Acquisition config)
+                string sSA = _id + "SA" +
+                    ((int)LimitThreshold(Nm2AD(AquisitionConfig.Threshold))).ToString("X8") +
+                    ((int)LimitThresholdEnd(Nm2AD(AquisitionConfig.ThresholdEnd))).ToString("X8") +
+                    ((int)LimitTimeoutEnd_ms(AquisitionConfig.TimeoutEnd_ms)).ToString("X4") +
+                    ((int)LimitTimeStep_ms(AquisitionConfig.TimeStep_ms)).ToString("X4") +
+                    ((int)LimitFilterFrequency(AquisitionConfig.FilterFrequency)).ToString("X4") +
+                    ((int)AquisitionConfig.Dir).ToString("X2") +
+                    ((int)AquisitionConfig.ToolType).ToString("X2");
+                string saFrame = "[" + sSA + makeCRC(sSA) + "]";
+                list.Add(new Tuple<string, byte[]>(saFrame, Encoding.UTF8.GetBytes(saFrame)));
+
+                // 5) SB (optional)
+                string sSB = _id + "SB" +
+                    ((int)LimitTorqueTarget(Nm2AD(AquisitionConfig.TorqueTarget))).ToString("X8") +
+                    ((int)LimitTorqueMax(Nm2AD(AquisitionConfig.TorqueMax))).ToString("X8") +
+                    ((int)LimitTorqueMin(Nm2AD(AquisitionConfig.TorqueMin))).ToString("X8") +
+                    ((int)LimitAngleTarget(ConvertAngleToBus(AquisitionConfig.AngleTarget))).ToString("X8") +
+                    ((int)LimitAngleMax(ConvertAngleToBus(AquisitionConfig.AngleMax))).ToString("X8") +
+                    ((int)LimitAngleMin(ConvertAngleToBus(AquisitionConfig.AngleMin))).ToString("X8") +
+                    "00000000";
+                string sbFrame = "[" + sSB + makeCRC(sSB) + "]";
+                list.Add(new Tuple<string, byte[]>(sbFrame, Encoding.UTF8.GetBytes(sbFrame)));
+
+                // 6) SC (optional)
+                string sSC = _id + "SC" +
+                    ((int)LimitDelayToDetectFirstPeak_ms(AquisitionConfig.DelayToDetectFirstPeak_ms)).ToString("X4") +
+                    ((int)LimitTimeToIgnoreNewPeak_AfterFinalThreshold_ms(AquisitionConfig.TimeToIgnoreNewPeak_AfterFinalThreshold_ms)).ToString("X4") +
+                    "000000000000000000000000000000000000000000000000";
+                string scFrame = "[" + sSC + makeCRC(sSC) + "]";
+                list.Add(new Tuple<string, byte[]>(scFrame, Encoding.UTF8.GetBytes(scFrame)));
+            }
+            catch (Exception ex)
+            {
+                // Apenas loga falhas na montagem; não altera estado
+                try { TransducerLogger.LogException(ex, "GetInitReadFrames failed"); } catch { }
+            }
+            return list;
+        }
+
+
+
+
+
+
+
+
+
         public void RequestInformation()
         {
             try
@@ -1020,6 +1093,8 @@ namespace Transducers
                         {
                             SetState(eState.eWaitingAnswerReadCommand);
                             SendCommand(_id + "TQ");
+
+                            TransducerLogger.Log("SendCommand_id + TQ");
                         }
 
 
@@ -1616,8 +1691,84 @@ namespace Transducers
             catch { }
         }
 
-        // SendCommand: log TX (request and actual framed command). Mantive lógica de tentativas.
-        // Substitua o método SendCommand por este (inclui logs TX em hex e texto)
+
+        public List<Tuple<string, byte[]>> GetInitReadPayloads()
+        {
+            var list = new List<Tuple<string, byte[]>>();
+
+            try
+            {
+                // 1) ZO (SetZeroTorque) - InitRead usa sempre "1" + "0" (force zero torque on)
+                string ztCmd = _id + "ZO" + "1" + "0";
+                byte[] ztBytes = Encoding.UTF8.GetBytes(ztCmd);
+                list.Add(new Tuple<string, byte[]>(ztCmd, ztBytes));
+
+                // 2) ZO0 (SetZeroAngle) - InitRead uses _id + "ZO0" + "1"
+                string zaCmd = _id + "ZO0" + "1";
+                byte[] zaBytes = Encoding.UTF8.GetBytes(zaCmd);
+                list.Add(new Tuple<string, byte[]>(zaCmd, zaBytes));
+
+                // 3) CS (Click wrench config) - uses clickFall, clickRise, clickMinTime_ms
+                string csCmd = _id + "CS" +
+                               ((int)LimitClickFall(AquisitionClickWrenchConfig.FallPercentage)).ToString("X2") +
+                               ((int)LimitClickRise(AquisitionClickWrenchConfig.RisePercentage)).ToString("X2") +
+                               ((int)LimitClickWidth_ms(AquisitionClickWrenchConfig.MinTimeBetweenPulses_ms)).ToString("X2");
+                byte[] csBytes = Encoding.UTF8.GetBytes(csCmd);
+                list.Add(new Tuple<string, byte[]>(csCmd, csBytes));
+
+                // 4) SA (Aquisition config) - build same fields as InitRead / eMustSendAquisitionConfig
+                string sSA = _id + "SA" +
+                    ((int)LimitThreshold(Nm2AD(AquisitionConfig.Threshold))).ToString("X8") +
+                    ((int)LimitThresholdEnd(Nm2AD(AquisitionConfig.ThresholdEnd))).ToString("X8") +
+                    ((int)LimitTimeoutEnd_ms(AquisitionConfig.TimeoutEnd_ms)).ToString("X4") +
+                    ((int)LimitTimeStep_ms(AquisitionConfig.TimeStep_ms)).ToString("X4") +
+                    ((int)LimitFilterFrequency(AquisitionConfig.FilterFrequency)).ToString("X4") +
+                    ((int)AquisitionConfig.Dir).ToString("X2") +
+                    ((int)AquisitionConfig.ToolType).ToString("X2");
+                byte[] saBytes = Encoding.UTF8.GetBytes(sSA);
+                list.Add(new Tuple<string, byte[]>(sSA, saBytes));
+
+                // 5) SB and SC MAY be sent by dispatcher (InitRead doesn't always call them synchronously),
+                //    but if you want them included, build them here similarly to dispatcher:
+                string sSB = _id + "SB" +
+                    ((int)LimitTorqueTarget(Nm2AD(AquisitionConfig.TorqueTarget))).ToString("X8") +
+                    ((int)LimitTorqueMax(Nm2AD(AquisitionConfig.TorqueMax))).ToString("X8") +
+                    ((int)LimitTorqueMin(Nm2AD(AquisitionConfig.TorqueMin))).ToString("X8") +
+                    ((int)LimitAngleTarget(ConvertAngleToBus(AquisitionConfig.AngleTarget))).ToString("X8") +
+                    ((int)LimitAngleMax(ConvertAngleToBus(AquisitionConfig.AngleMax))).ToString("X8") +
+                    ((int)LimitAngleMin(ConvertAngleToBus(AquisitionConfig.AngleMin))).ToString("X8") +
+                    "00000000";
+                byte[] sbBytes = Encoding.UTF8.GetBytes(sSB);
+                list.Add(new Tuple<string, byte[]>(sSB, sbBytes));
+
+                string sSC = _id + "SC" +
+                    ((int)LimitDelayToDetectFirstPeak_ms(AquisitionConfig.DelayToDetectFirstPeak_ms)).ToString("X4") +
+                    ((int)LimitTimeToIgnoreNewPeak_AfterFinalThreshold_ms(AquisitionConfig.TimeToIgnoreNewPeak_AfterFinalThreshold_ms)).ToString("X4") +
+                    "000000000000000000000000000000000000000000000000";
+                byte[] scBytes = Encoding.UTF8.GetBytes(sSC);
+                list.Add(new Tuple<string, byte[]>(sSC, scBytes));
+            }
+            catch (Exception ex)
+            {
+                // Nunca deixe falha aqui impedir a execução; apenas logue.
+                try { TransducerLogger.LogException(ex, "GetInitReadPayloads failed"); } catch { }
+            }
+
+            return list;
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+        // Substitua o método SendCommand existente por este (mantém comportamento, adiciona logs pré-CRC)
         private void SendCommand(string cmd, int awaitedsize = 0)
         {
             for (int i = 0; i < 3; i++)
@@ -1626,17 +1777,38 @@ namespace Transducers
                 {
                     if (((_Eth_IP == string.Empty || _Eth_IP == null) && SerialPort.IsOpen) || (_Eth_IP != string.Empty && _Eth_IP != null && sck.Connected))
                     {
-                        // LOG: comando solicitado antes de montar CRC
-                        try { TransducerLogger.LogFmt("SendCommand REQUEST: cmd='{0}' awaitedsize={1}", cmd, awaitedsize); } catch { }
+                        // LOG: comando solicitado antes de montar CRC (texto do payload sem CRC)
+                        try
+                        {
+                            TransducerLogger.LogFmt("SendCommand REQUEST: cmd='{0}' awaitedsize={1}", cmd, awaitedsize);
+                        }
+                        catch { }
 
+                        // --- NOVO: gravação do payload (SEM CRC) no log de protocolo ---
+                        try
+                        {
+                            // payload ASCII sem CRC e sem colchetes
+                            string payloadAscii = cmd;
+
+                            // converte payload para bytes (UTF8 como uso atual)
+                            byte[] payloadBytes = Encoding.UTF8.GetBytes(payloadAscii);
+
+                            // Grava uma entrada no arquivo de protocolo com a TAG "TX" contendo o ASCII (texto)
+                            ProtocolFileLogger.WriteProtocol("TX", payloadAscii, payloadBytes);
+
+                            // Também registra no TransducerLogger em hex (útil na depuração)
+                            TransducerLogger.LogHex("TX PAYLOAD BYTES", payloadBytes, 0, payloadBytes.Length);
+                        }
+                        catch (Exception exLog)
+                        {
+                            // não interromper envio por falha de logging
+                            TransducerLogger.LogException(exLog, "SendCommand: ProtocolFileLogger.WriteProtocol pre-CRC failed");
+                        }
+                        // --- FIM do log pré-CRC ---
+
+                        // Agora monta o frame final com CRC e colchetes (comportamento antigo)
                         string cmdout = "[" + cmd + makeCRC(cmd) + "]";
                         _awaitedsize = awaitedsize;
-
-
-
-
-
-
 
                         // LOG: comando final (com CRC) que será enviado (texto)
                         try { TransducerLogger.LogFmt("TX -> {0}", cmdout); } catch { }
@@ -1647,11 +1819,13 @@ namespace Transducers
                             byte[] txBytes = Encoding.UTF8.GetBytes(cmdout);
                             TransducerLogger.LogHex("TX BYTES", txBytes, 0, txBytes.Length);
 
+                            // grava o frame completo + bytes (como era antes)
                             ProtocolFileLogger.WriteProtocol("TX Bytes", cmdout, txBytes);
-
-
                         }
-                        catch { }
+                        catch (Exception exHexLog)
+                        {
+                            TransducerLogger.LogException(exHexLog, "SendCommand: ProtocolFileLogger.WriteProtocol frame logging failed");
+                        }
 
                         Write2Log("<-TX: " + System.Environment.TickCount + " :" + cmdout);
 
@@ -1704,32 +1878,21 @@ namespace Transducers
                     }
                     else
                     {
-
                         Write2Log("send err " + System.Environment.TickCount);
                         TransducerLogger.LogFmt("SendCommand ERROR: connection not open (Eth_IP='{0}', SerialOpen={1}, sckConnected={2})", _Eth_IP, SerialPort.IsOpen, (sck != null && sck.Connected));
-
 
                         Internal_StopService();
 
                         if (bUserStartService && bPortOpen)
                         {
                             Debug.Print("ERR 105");
-                            try
-                            {
-                                //if (RaiseError != null)
-                                //{
-                                //if (enableraiseerrors)
-                                // RaiseError(105);
-                                //}
-                            }
-                            catch { }
                         }
                     }
                     break;
                 }
                 catch (Exception ex)
                 {
-                    // Log completo da exceção
+                    // Log completo da exceção e retry
                     TransducerLogger.LogException(ex, "SendCommand exception - retrying");
                     if (bUserStartService && bPortOpen)
                     {
@@ -3799,7 +3962,7 @@ namespace Transducers
                 TransducerLogger.Log("SetZeroTorque called - MustSendZeroTorque true");
                 try { ProtocolFileLogger.WriteProtocol("SYS", "SetZeroTorque called", null); } catch { }
 
-
+                StartReadData();
             }
             catch (Exception err)
             {

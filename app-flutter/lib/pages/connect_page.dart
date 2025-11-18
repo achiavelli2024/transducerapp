@@ -69,6 +69,18 @@ class _ConnectPageState extends State<ConnectPage> {
     }
   }
 
+
+
+
+
+
+
+
+
+
+
+
+
   // Connect: create PhoenixTransducer, assign callbacks and start service
   Future<void> _connect() async {
     final ip = _ipController.text.trim();

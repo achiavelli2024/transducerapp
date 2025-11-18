@@ -13,6 +13,8 @@ using Transducers;
 using System.IO;
 using System.Diagnostics;
 using Transducer_Estudo;
+using System.Text;
+
 
 
 using Transducer_Estudo;
@@ -22,6 +24,8 @@ namespace Transducer_Estudo
     public partial class Form1 : Form
     {
         private ITransducer Trans;
+
+        private PhoenixTransducer px;
 
         private DataInformation Datainfo = new DataInformation();
         //private CountersInformation Countersinfo = new CountersInformation();
@@ -135,6 +139,7 @@ namespace Transducer_Estudo
             TransducerLogger.Log("ConnectCom: timer1 started");
         }
 
+        // Substitua no arquivo do seu Form (onde btnReadData_Click está definido)
         private void btnReadData_Click(object sender, EventArgs e)
         {
             tickLastUpdateTorque = 0;
@@ -144,41 +149,56 @@ namespace Transducer_Estudo
 
             TransducerLogger.Log("btnReadData_Click - calling InitRead()");
 
-
-            // --- NOVO: gravação no log de protocolo por sessão ---
-            // ProtocolFileLogger.WriteProtocol(direction, text, rawBytes = null)
-            // direction: "SYS" / "TX" / "RX" (uso "SYS" para eventos de sistema/ação do usuário)
+            // --- NOVO: gravação no log de protocolo por sessão (pré-envio dos payloads de InitRead) ---
             try
             {
-                // Mensagem textual que será gravada no arquivo de protocolo
-                string protoMsg = "UI BUTTON: btnReadData clicked by user";
+                ProtocolFileLogger.WriteProtocol("SYS", "UI BUTTON: btnReadData clicked by user", null);
 
-                // Escreve no arquivo de protocolo (texto + sem bytes)
-                ProtocolFileLogger.WriteProtocol("SYS", protoMsg, null);
+                // Se a sua Form tem uma instância do PhoenixTransducer, use-a para obter os payloads
+                if (this.Trans != null)
+                {
+                    try
+                    {
+                        //var payloads = this.Trans.GetInitReadPayloads();
+                        var payloads = this.Trans.GetInitReadFrames();
 
-                // Se desejar gravar também os bytes associados ao evento (opcional)
-                // Exemplo: gravar um marcador em bytes (não necessário para identificar o clique)
-                // byte[] marker = Encoding.UTF8.GetBytes(protoMsg);
-                // ProtocolFileLogger.WriteProtocol("SYS", protoMsg, marker);
+
+                        foreach (var p in payloads)
+                        {
+                            string ascii = p.Item1;
+                            byte[] bytes = p.Item2;
+
+                            // Grava payload ASCII e os bytes correspondentes (pré-CRC)
+                            ProtocolFileLogger.WriteProtocol("TX (pre-CRC)", ascii, bytes);
+
+                            // Também logue em TransducerLogger para console/debug
+                            TransducerLogger.LogFmt("btnReadData: planned payload (pre-CRC): {0}", ascii);
+                            TransducerLogger.LogHex("btnReadData: planned payload bytes", bytes, 0, bytes.Length);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        TransducerLogger.LogException(ex, "btnReadData: GetInitReadPayloads logging failed");
+                    }
+                }
+                else
+                {
+                    // Se não houver instância disponível aqui, apenas registre aviso (não interrompe)
+                    ProtocolFileLogger.WriteProtocol("SYS", "PhoenixTransducer instance not available at btnReadData (pre-CRC payloads not logged)", null);
+                    TransducerLogger.Log("btnReadData: PhoenixTransducer instance is null - cannot fetch planned payloads");
+                }
             }
             catch (Exception ex)
             {
-                // Não deixe uma falha de logging interromper a UI
                 TransducerLogger.LogException(ex, "ProtocolFileLogger write error in btnReadData_Click");
             }
 
-
-
-
-
-
-
-
-
-
-
+            // Chama InitRead (o PhoenixTransducer fará os envios reais e logs do SendCommand)
             InitRead();
         }
+
+
+
 
 
         // InitRead: rotina que prepara a sequência ZO/CS/SA e inicia leitura.
